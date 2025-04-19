@@ -154,7 +154,6 @@ function init() {
         mSetCameraPosition(camera, mCameraOffset, playerMesh);
     } );
 
-
     let grid_size = mScale*5;
     let gridH_size = mScale*4;
     let buildThick = mScale*0.1;
