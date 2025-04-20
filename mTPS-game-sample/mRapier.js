@@ -63,6 +63,11 @@ function init() {
     const scene = new THREE.Scene();
 
     let mScale = 1;
+    let grid_size = mScale*5;
+    let gridH_size = mScale*4;
+    let buildThick = mScale*0.1;
+    let grid_num = 10;
+
  
     let camera = new THREE.PerspectiveCamera(80, width / height, mScale*0.01, mScale * 100);
     let mCameraOffset = new Object();
@@ -93,6 +98,46 @@ function init() {
         }
     }
 
+    //--- Light ---//
+    const light = new THREE.DirectionalLight(0xFFFFFF);
+    light.position.set(0, gridH_size* grid_num, grid_size*3);
+    light.intensity = 1; 
+    light.castShadow = true;
+    console.log("light.shadow.camera:%o", light.shadow.camera);
+    light.shadow.camera.top *= grid_size * grid_num ;
+    light.shadow.camera.bottom *= grid_size * grid_num ;
+    light.shadow.camera.left *= grid_size * grid_num ;
+    light.shadow.camera.right *= grid_size * grid_num ;
+    light.shadow.mapSize.width = 1024 * 16
+    light.shadow.mapSize.height = 1024 * 16
+    //light.shadow.camera.near = gridH_size*grid_num
+    light.shadow.camera.far = gridH_size*grid_num*1.3;
+    scene.add(light);
+    //const light = new THREE.SpotLight(0xffffff, 400, 100, Math.PI / 4, 1);
+    //light.castShadow = true;
+    //scene.add(light);
+
+    const light2 = new THREE.DirectionalLight(0xFFFFFF);
+    light2.position.set(grid_size*3, gridH_size* grid_num, -grid_size*3);
+    light2.intensity = 1; 
+    scene.add(light2);
+
+    /*const light3 = new THREE.DirectionalLight(0xFFFFFF);
+    light2.position.set(grid_size*3, gridH_size* grid_num, 0);
+    light2.intensity = 0.1; 
+    scene.add(light2);*/
+
+
+    //--- Environment ---//
+    new THREE.RGBELoader()
+        .setPath( 'image/' )
+        .load( 'quarry_01_1k.hdr', function ( texture ) {
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+            scene.background = texture;
+            scene.environment = texture;
+        } );
+
+
     //--- Character model ---//
     //const url = '/mTPS-game-sample/model/no0.glb';
     
@@ -106,11 +151,11 @@ function init() {
     
     let mixer;
     let props, lastAnimID;
-    let arrayAction = new Array(8); //[];
-    let mAnimOrder = {Idle:0, RunForward:1, RunBack:2, RunLeft:3, RunRight:4, Jump:5, CrouchIdle:6, CrouchForward:7};
+    let arrayAction = new Array(9); //[];
+    let mAnimOrder = {Idle:0, RunForward:1, RunBack:2, RunLeft:3, RunRight:4, Jump:5, CrouchIdle:6, CrouchForward:7, Slide:8};
     let model_scale = mScale*0.01;  // 10;
     const loader = new THREE.FBXLoader();
-    loader.load( 'model/mSet8.fbx', function ( object ) {
+    loader.load( 'model/mSet9.fbx', function ( object ) {
 
         console.log("object:%o", object);
         //object.children[1].visible = false;
@@ -120,6 +165,9 @@ function init() {
         for(var i = 0; i<object.animations.length; i++){
             console.log("%o", object.animations[ i ]);
             //arrayAction.push( mixer.clipAction(object.animations[ i ]) );
+            if(object.animations[i].name=="Slide"){
+                object.animations[i] = THREE.AnimationUtils.subclip(object.animations[i], 'Slide', 1, 27);
+            }
             arrayAction[ mAnimOrder[object.animations[i].name] ] = mixer.clipAction(object.animations[ i ]);
         }
         arrayAction[0].play();
@@ -127,6 +175,11 @@ function init() {
 
         arrayAction[5].setLoop(THREE.LoopOnce);
         arrayAction[5].clampWhenFinished = true;
+
+        //arrayAction[8] = THREE.AnimationUtils.subclip(arrayAction[8], 'Slide', 1, 30);
+        arrayAction[8].setLoop(THREE.LoopOnce);
+        //arrayAction[8].setDuration(1.0);
+        arrayAction[8].clampWhenFinished = true;
 
         object.traverse( function ( child ) {
             if ( child.isMesh ) {
@@ -154,10 +207,6 @@ function init() {
         mSetCameraPosition(camera, mCameraOffset, playerMesh);
     } );
 
-    let grid_size = mScale*5;
-    let gridH_size = mScale*4;
-    let buildThick = mScale*0.1;
-    let grid_num = 10;
 
     //--- Global Axis ---//
     const size = grid_size*0.1;
@@ -284,9 +333,11 @@ function init() {
         const playerBodyStandMesh = new THREE.Mesh(new THREE.CapsuleGeometry(playerRadius, playerRadius*3), new THREE.MeshBasicMaterial({color: 0x0000FF, wireframe: true}))
         playerBodyStandMesh.castShadow = false
         playerBodyMesh.add(playerBodyStandMesh);
-            //const playerBodySquatMesh = new THREE.Mesh(new THREE.CapsuleGeometry(playerRadius, playerRadius*1.5), new THREE.MeshBasicMaterial({color: 'red', wireframe: true}))
-            //playerBodySquatMesh.castShadow = false
-            //playerBodyMesh.add(playerBodySquatMesh)
+            const playerBodySquatMesh = new THREE.Mesh(new THREE.CapsuleGeometry(playerRadius, playerRadius*1.5), new THREE.MeshBasicMaterial({color: 'red', wireframe: true}))
+            playerBodySquatMesh.position.set(0, -playerRadius*0.75, 0);
+            playerBodySquatMesh.castShadow = false
+            playerBodySquatMesh.visible = false
+            playerBodyMesh.add(playerBodySquatMesh)
     scene.add(playerBodyMesh)
     ArrayMesh.push(playerBodyMesh);
 
@@ -298,11 +349,13 @@ function init() {
         //console.log("playerCollider.handle:%o", playerCollider.handle)
         console.log("playerCollider.handle:", playerCollider)
 
-        /*const playerSquatBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, playerRadius*5, 0).lockRotations())
-        const playerSquatShape = RAPIER.ColliderDesc.capsule(playerRadius*0.75, playerRadius).setMass(1).setRestitution(0.0).setFriction(2.0)
+        //const playerSquatBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, playerRadius*5, 0).lockRotations())
+        const playerSquatShape = RAPIER.ColliderDesc.capsule(playerRadius*0.75, playerRadius).setMass(1.0).setTranslation(0.0, -playerRadius*0.75, 0.0).setRestitution(0.0).setFriction(0.0)
         playerSquatShape.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-        let playerSquatCollider = world.createCollider(playerSquatShape, playerSquatBody);
-        ArrayPlayerCollider.push(playerSquatCollider);*/
+        let playerSquatCollider = world.createCollider(playerSquatShape, playerBody);
+        playerSquatCollider.setEnabled(false);
+        ArrayPlayerCollider.push(playerSquatCollider);
+
     ArrayBody.push(playerBody);
     //playerBody.setLinearDamping(1.0);
 
@@ -315,10 +368,10 @@ function init() {
             playerBody.setGravityScale(1/g_scale, true);
             playerCollider.setFriction(0.0)
         }
-        if(mixer){
-            arrayAction[0].stop();
-            arrayAction[5].play();
-        }
+        //if(mixer){
+        //    arrayAction[0].stop();
+        //    arrayAction[5].play();
+        //}
     }
 
     function mPlayerIsGrounded(){
@@ -328,54 +381,18 @@ function init() {
             playerBody.setGravityScale(1.0, true);
             playerCollider.setFriction(2.0)
         }
-        if(mixer){
+        //if(mixer){
             arrayAction[5].stop();
             //if(!arrayAction[0].isRunning){
-                arrayAction[0].play();    
+            //    arrayAction[0].play();    
             //}
-        }
+        //}
     }
-    
-
-    //--- Light ---//
-    const light = new THREE.DirectionalLight(0xFFFFFF);
-    light.position.set(0, gridH_size* grid_num, grid_size*3);
-    light.intensity = 2; 
-    light.castShadow = true;
-    console.log("light.shadow.camera:%o", light.shadow.camera);
-    light.shadow.camera.top *= grid_size * grid_num ;
-    light.shadow.camera.bottom *= grid_size * grid_num ;
-    light.shadow.camera.left *= grid_size * grid_num ;
-    light.shadow.camera.right *= grid_size * grid_num ;
-    light.shadow.mapSize.width = 1024 * 16
-    light.shadow.mapSize.height = 1024 * 16
-    //light.shadow.camera.near = gridH_size*grid_num
-    light.shadow.camera.far = gridH_size*grid_num*1.3;
-    scene.add(light);
-    //const light = new THREE.SpotLight(0xffffff, 400, 100, Math.PI / 4, 1);
-    //light.castShadow = true;
-    //scene.add(light);
-
-    const light2 = new THREE.DirectionalLight(0xFFFFFF);
-    light2.position.set(grid_size*3, gridH_size* grid_num, 0);
-    light2.intensity = 0.5; 
-    scene.add(light2);
-
-
-    //--- Environment ---//
-    new THREE.RGBELoader()
-        .setPath( 'image/' )
-        .load( 'quarry_01_1k.hdr', function ( texture ) {
-            texture.mapping = THREE.EquirectangularReflectionMapping;
-            scene.background = texture;
-            scene.environment = texture;
-        } );
-
 
     //--- Key event ---//
     var keyEnabledArray = Array(222).fill(true);
     let movement = {'forward': false, 'back': false, 'left': false, 'right': false};
-    let lastJumpTime = performance.now();
+    let lastJumpTime = -1; //performance.now();
 
     $(document).on( 'keydown keyup', (event) => {  
 
@@ -431,23 +448,37 @@ function init() {
         }
 
         if(event.key === 'Shift'  && event.type === 'keydown'){
-            console.log('Shift');
-            if(c_player && c_player.isGrounded ){
-                if(c_player.isCrouch){
-                    c_player.isCrouch = false;
-                }else{
-                    c_player.isCrouch = true;
-                }
-                console.log('c_player.isCrouch:', c_player.isCrouch);
+            if(c_player.slidingPressedTime < 0){
+                c_player.slidingPressedTime = new Date().getTime();
             }
-            if(playerCollider){
-                //console.log('isEnabled:',playerCollider.isEnabled());
-               /* if(playerCollider.isEnabled()){
-                    playerCollider.setEnabled(false);
-                }else{
-                    playerCollider.setEnabled(true);
+            c_player.isSliding = false;
+            //console.log('c_player.slidingPressedTime:'+c_player.slidingPressedTime);
+        }
+        if(event.key === 'Shift'  && event.type === 'keyup'){
+            //console.log('Shift');
+            c_player.slidingPressedTime = -1;
+            //console.log('c_player.isSliding:'+c_player.isSliding);
+            if( !c_player.isSliding ){
+                if(c_player && c_player.isGrounded ){
+                    if(c_player.isCrouch){
+                        c_player.isCrouch = false;
+                        /*playerCollider.setEnabled(true)
+                        playerSquatCollider.setEnabled(false)
+                        playerBodyStandMesh.visible = true
+                        playerBodySquatMesh.visible = false*/
+                        mSetPlayerColliderCrouch(false)
+                    }else{
+                        c_player.isCrouch = true;
+                        /*playerSquatCollider.setEnabled(true)
+                        playerCollider.setEnabled(false)
+                        playerBodyStandMesh.visible = false
+                        playerBodySquatMesh.visible = true*/
+                        mSetPlayerColliderCrouch(true)
+                    }
+                    //console.log('c_player.isCrouch:', c_player.isCrouch);
                 }
-                console.log('isEnabled:',playerCollider.isEnabled());*/
+            }else{
+                c_player.isSliding = false;
             }
             
         }
@@ -464,6 +495,14 @@ function init() {
         }
     
     });
+
+    function mSetPlayerColliderCrouch(isCrouch){
+        //console.log("mSetPlayerColliderCrouch:",isCrouch)
+        playerCollider.setEnabled(!isCrouch)
+        playerSquatCollider.setEnabled(isCrouch)
+        playerBodyStandMesh.visible = !isCrouch
+        playerBodySquatMesh.visible = isCrouch
+    }
     
     //--- Mouse event ---//
     var mMouseSenseX = 0.00065*3; //0.00065 at 10%
@@ -476,6 +515,8 @@ function init() {
     c_player.isGrounded = false;
     c_player.isOnSlope = false;
     c_player.isJump = false;
+    c_player.slidingPressedTime = -1;
+    c_player.isSliding = false;
 
     canvas3d.addEventListener('mousemove', function(e)
     {
@@ -529,7 +570,7 @@ function init() {
     let playerMoveDirection = new THREE.Vector3(0,0,0)
     let playerPlaneMoveDistance = new THREE.Vector3(0,0,0)
     let t = 0;
-    let lastGroundedTime = performance.now();
+    let lastGroundedTime = -1; //performance.now();
 
     let eventQueue = new RAPIER.EventQueue(true);
     
@@ -538,10 +579,7 @@ function init() {
     function tick() {
         stats.begin();
 
-        //const time_world = performance.now() / 1000
-        //const dt_world = time_world - lastCallTime
-        //lastCallTime = time_world
-        let currentTime = performance.now();
+        //let currentTime = performance.now();
 
         delta = clock.getDelta()
         if (world) {
@@ -583,14 +621,15 @@ function init() {
                     // Handle the contact force event. 
                     //console.log("contact:%o, %o", handle1, handle2)
                     //console.log("contact:%o", event.totalForce())
-                    let time_now = performance.now();
+                    let time_now = new Date().getTime(); //performance.now();
                     for(var i = 0; i < ArrayPlayerCollider.length; i++){
                         let h = ArrayPlayerCollider[i].handle
                         //if(handle1==playerCollider.handle || handle2==playerCollider.handle){
                         if(handle1==h || handle2==h){
                             //console.log("contact:%o", event.totalForce())
                             if(event.totalForce().y > 1 && time_now > lastJumpTime + 100  ){ // 
-                                lastGroundedTime = performance.now();
+                                //lastGroundedTime = performance.now();
+                                lastGroundedTime = time_now;
                                 c_player.isGrounded = true;
                             
                                 if( Math.abs(event.totalForce().x) > 1.0 || Math.abs(event.totalForce().z) > 1.0){
@@ -640,16 +679,17 @@ function init() {
 
             //let time_now = performance.now();
         
+            /*
             let s = playerBody.linvel();
             //console.log("s:", s)
             if(s.y < -10){
                 playerBody.setLinvel({ x: s.x, y: -10, z: s.z}, true);
             }
-
+            */
 
             //console.log("dTime:" + (currentTime - lastGroundedTime) )
 
-            if(currentTime > lastGroundedTime + 20  ){ // Fall
+            if(current_game_time > lastGroundedTime + 20  ){ // Fall
                 //console.log("Fall:")
                 c_player.isGrounded = false;
                 c_player.isOnSlope = false;
@@ -668,30 +708,44 @@ function init() {
                 //playerBody.setLinvel({ x: vx, y: 0, z: vz}, true);
                 //playerBody.applyImpulse({ x: vx, y: 6, z: vz }, true);
                 playerBody.applyImpulse({ x: 0.0, y: 6, z: 0.0 }, true);
-                lastJumpTime = performance.now();
+                lastJumpTime = new Date().getTime(); // performance.now();
                 
                 c_player.isJump = false;
             }
 
             if( c_player.isGrounded ){
                 mPlayerIsGrounded()
-                lastGroundedTime = currentTime
+                lastGroundedTime = current_game_time //currentTime
+                if(arrayAction[5].isRunning()){
+                    arrayAction[5].stop();
+                }
+            }else{
+                if(arrayAction[0].isRunning()){
+                    arrayAction[0].stop();
+                }
+                if(!arrayAction[5].isRunning()){
+                    arrayAction[5].play();
+                }
             }
 
             //console.log("c_player.isGrounded:"+c_player.isGrounded)
             //console.log("currentTime:" + currentTime +" lastGroundedTime:"+lastGroundedTime)
 
+            
             if( (!movement.forward) && (!movement.back) && (!movement.left) && (!movement.right) ){
                 if(!c_player.isCrouch){
-                    if(!arrayAction[0].isRunning){
-                        //arrayAction[0].play();
+                    if(arrayAction[6].isRunning()){
+                        arrayAction[6].stop();
+                    }
+                    if(!arrayAction[0].isRunning()){
+                        arrayAction[0].play();
                     }
                 }else{
                     console.log("crouch")
-                    if(arrayAction[0].isRunning){
+                    if(arrayAction[0].isRunning()){
                         arrayAction[0].stop();
                     }
-                    if(!arrayAction[6].isRunning){
+                    if(!arrayAction[6].isRunning()){
                         arrayAction[6].play();
                     }
                 }
@@ -731,7 +785,31 @@ function init() {
                 arrayAction[4].stop();
             }   
 
+            if( current_game_time > c_player.slidingPressedTime + 500 && c_player.slidingPressedTime > 0 ){
+                c_player.isSliding = true;
+                //c_player.slidingPressedTime = -1;
+            }
 
+            if(c_player.isSliding){
+                console.log('c_player.isSliding:'+c_player.isSliding);
+                arrayAction[1].stop();
+                if(!arrayAction[8].isRunning()){
+                    arrayAction[8].play();
+                }
+                mSetPlayerColliderCrouch(true)
+            }else{
+                //console.log('c_player.isSliding:'+c_player.isSliding);
+                arrayAction[8].stop();
+                if(!c_player.isCrouch){
+                    mSetPlayerColliderCrouch(false)
+                }
+                
+            }
+
+
+            //for(var i=0; i<arrayAction.length; i++){
+            //    console.log("arrayAction["+i+"]:"+arrayAction[i].isRunning() );
+            //}
             
         }
 
@@ -756,6 +834,10 @@ function init() {
             let a1 = c_player.angle;
             let s = playerBody.linvel();
             //console.log("playerBody.linvel():%o", playerBody.linvel());
+
+            if(s.y < -10){
+                playerBody.setLinvel({ x: s.x, y: -10, z: s.z}, true);
+            }
 
             let input_sx = 0;
             let input_sz = 0;
