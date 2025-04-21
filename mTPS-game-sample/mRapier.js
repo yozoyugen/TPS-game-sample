@@ -18,22 +18,7 @@ function init() {
 
     let width = window.innerWidth;
     let height = window.innerHeight;
-
     const canvas2d = document.querySelector( '#canvas-2d' );
-    var W_ = canvas2d.width;
-    var H_ = canvas2d.height;
-    console.log("canvas2d:"+W_+", "+H_)
-    canvas2d.setAttribute("width", width);
-    canvas2d.setAttribute("height", height);
-    W_ = canvas2d.width;
-    H_ = canvas2d.height;
-    console.log("canvas2d:"+W_+", "+H_)
-
-    const context2d = canvas2d.getContext('2d');
-    //context2d.textAlign = "center"
-    //context2d.fillText( "test", 1000, 200);
-    //context2d.fillStyle = "blue"
-    //context2d.fillRect(100, 100, 1000, 1000);
 
     
     let g_scale = 20.0
@@ -102,7 +87,7 @@ function init() {
     const light = new THREE.DirectionalLight(0xFFFFFF);
     light.position.set(0, gridH_size* grid_num, grid_size*3);
     light.intensity = 1; 
-    light.castShadow = true;
+    light.castShadow = false; //true;
     console.log("light.shadow.camera:%o", light.shadow.camera);
     light.shadow.camera.top *= grid_size * grid_num ;
     light.shadow.camera.bottom *= grid_size * grid_num ;
@@ -147,7 +132,7 @@ function init() {
     //playerMesh.receiveShadow = true;
 
     let model = null;
-    let mAxes = null;
+    //let mAxes = null;
     
     let mixer;
     let props, lastAnimID;
@@ -189,12 +174,12 @@ function init() {
         } );
 
         //--- Axis ---//
-        const size = mScale*0.1;
+        /*const size = mScale*0.1;
         mAxes = new THREE.AxesHelper(size);
         mAxes.position.x =  0;
-        mAxes.position.y = mScale*0.01; 
+        mAxes.position.y = mScale*1.0; 
         //mAxes.position.y = 2000; 
-        playerMesh.add(mAxes);
+        playerMesh.add(mAxes);*/
 
         //object.position.set(0, 0, 0);
         //scene.add( object );
@@ -518,7 +503,7 @@ function init() {
     c_player.slidingPressedTime = -1;
     c_player.isSliding = false;
 
-    canvas3d.addEventListener('mousemove', function(e)
+    canvas2d.addEventListener('mousemove', function(e)
     {
         //console.log("mousemove:");
         
@@ -551,14 +536,25 @@ function init() {
 
     const gui = new GUI();
     props = {
-        showAxes: true,
+        //showAxes: true,
         showCollision: true,
-        //Animation: 0
+        showShadow: false,
+        //pointerLock: false,
     };
-    gui.add( props, 'showAxes').name('Show axes');
-    gui.add( props, 'showCollision').name('Show collision');
-    //gui.add( props, 'Animation', { Idle: 0, Forward: 1, Back: 2, Left: 3, Right: 4 } );
-    //lastAnimID = 0;
+    //gui.add( props, 'showAxes').name('Show axes')
+    gui.add( props, 'showCollision').name('Show collision').onChange( value => {
+        playerBodyMesh.visible = value;
+      })
+    gui.add( props, 'showShadow').name('Show shadow').onChange( value => {
+        light.castShadow = value;
+      })
+    /*gui.add( props, 'pointerLock').name('Pointer lock').onChange( value => {
+        if(value){
+            mEnablePointerLock();
+        }else{
+            DocumentExitPointerLock(document);
+        }
+      })*/
 
 
     const clock = new THREE.Clock();
@@ -656,22 +652,7 @@ function init() {
 
         t += 1;
           
-        if (mAxes != null){
-            if(props.showAxes){
-                mAxes.visible = true;
-            }else{
-                mAxes.visible = false;
-            }
-        }
-
-        if (playerBodyMesh != null){
-            if(props.showCollision){
-                playerBodyMesh.visible = true;
-            }else{
-                playerBodyMesh.visible = false;
-            }
-        }
-
+        
         
         //const delta = clock.getDelta();
         if ( mixer ) {
@@ -689,7 +670,7 @@ function init() {
 
             //console.log("dTime:" + (currentTime - lastGroundedTime) )
 
-            if(current_game_time > lastGroundedTime + 20  ){ // Fall
+            if(current_game_time > lastGroundedTime + 10  ){ // Fall
                 //console.log("Fall:")
                 c_player.isGrounded = false;
                 c_player.isOnSlope = false;
@@ -837,6 +818,7 @@ function init() {
 
             if(s.y < -10){
                 playerBody.setLinvel({ x: s.x, y: -10, z: s.z}, true);
+                s = playerBody.linvel();
             }
 
             let input_sx = 0;
@@ -982,9 +964,33 @@ function init() {
 
     function mEnablePointerLock(){
         setTimeout(() => {
-            ElementRequestPointerLock(canvas3d); //->needs action to enable pointer lock
+            ElementRequestPointerLock(canvas2d); //->needs action to enable pointer lock
         }, 1000);
     }
     
+    //---Description
+    //const canvas2d = document.querySelector( '#canvas-2d' );
+    var W_ = canvas2d.width;
+    var H_ = canvas2d.height;
+    console.log("canvas2d:"+W_+", "+H_)
+    canvas2d.setAttribute("width", width);
+    canvas2d.setAttribute("height", height);
+    W_ = canvas2d.width;
+    H_ = canvas2d.height;
+    console.log("canvas2d:"+W_+", "+H_)
+
+    const context2d = canvas2d.getContext('2d');
+    let fontSize = W_/100;
+    context2d.font = fontSize + 'px Bold Arial';
+    context2d.fillStyle = "white"
+    context2d.textAlign = "center"
+    context2d.fillText(
+        "P: pointer lock,  WASD: move,  Space: jump,  Shift: crouch,  Shift(long): slide",
+         W_/2, fontSize);
+    context2d.fillText(
+        "Mouse move: player's view direction",
+        W_/2, fontSize*2);         
+    //context2d.fillStyle = "blue"
+    //context2d.fillRect(100, 100, 1000, 1000);
 
 }//init
