@@ -11,10 +11,63 @@ function mbuttonAction(){
     init()
 }*/
 
+
 init();
 
 //window.addEventListener('DOMContentLoaded', init);
 function init() {
+
+    let mArrayAudio = [];
+
+    function loadAudio(url) {
+        return fetch(url,{mode: 'cors'})
+          .then(response => response.arrayBuffer())
+          .then(arrayBuffer => {
+              //mode: 'cors'
+              //credentials: 'omit'
+            return new Promise((resolve, reject) => {
+              audioContext.decodeAudioData(arrayBuffer, (audioBuffer) => {
+                resolve(audioBuffer);
+              }, (err) => {
+                reject(err);
+              });
+            });
+          });
+      }
+      
+    function loadAudios() {
+        let promises = [
+            loadAudio('/mTPS-game-sample/sound/bullet-hit-001.mp3'),
+        ];
+        Promise.all(promises).then(audioBuffers => {
+            
+            for(var i=0;i<audioBuffers.length;i++){
+                mArrayAudio[i] = audioBuffers[i];
+            }
+            console.log("sound loaded")
+        });    
+    
+    }
+    loadAudios()
+
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioContext = new AudioContext();
+
+    function mPlayAudioBuffer(audioBuffer, volume = 1.0) {
+        const audioSource = audioContext.createBufferSource();
+        audioSource.buffer = audioBuffer;
+        //console.log("volume:"+volume);
+
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = volume;
+        gainNode.connect(audioContext.destination);
+        audioSource.connect(gainNode);
+        audioSource.start();
+    }
+
+
+
+
 
     let width = window.innerWidth;
     let height = window.innerHeight;
@@ -56,15 +109,18 @@ function init() {
  
     let camera = new THREE.PerspectiveCamera(80, width / height, mScale*0.01, mScale * 100);
     let mCameraOffset = new Object();
-    mCameraOffset.dx = mScale*0.1;
-    mCameraOffset.dy = mScale*0.8; //1.4
-    mCameraOffset.dz = mScale*2.0; //1000*1.6;
+    mCameraOffset.dx = mScale*0.5;
+    mCameraOffset.dy = mScale*0.6; //1.4
+    mCameraOffset.dz = mScale*1.6; //1000*1.6;
     
     function mSetCameraPosition(camera, offset, model){
         let p = model.position;
         let dx = offset.dx; // 1000*0.1;
         let dy = offset.dy; //1000*1.4;
         let dz = offset.dz; //1000*1.6;
+        if(c_player.isCrouch || c_player.isSliding){
+            dy *= 0.5
+        }
         //camera.position.set(p.x + dx, p.y + dy, p.z + dz);
         //camera.lookAt(new THREE.Vector3(p.x + dx, p.y + dy, p.z));
 
@@ -136,11 +192,11 @@ function init() {
     
     let mixer;
     let props, lastAnimID;
-    let arrayAction = new Array(9); //[];
-    let mAnimOrder = {Idle:0, RunForward:1, RunBack:2, RunLeft:3, RunRight:4, Jump:5, CrouchIdle:6, CrouchForward:7, Slide:8};
+    let arrayAction = new Array(10); //[];
+    let mAnimOrder = {Idle:0, RunForward:1, RunBack:2, RunLeft:3, RunRight:4, Jump:5, CrouchIdle:6, CrouchForward:7, CrouchBack:8, Slide:9};
     let model_scale = mScale*0.01;  // 10;
     const loader = new THREE.FBXLoader();
-    loader.load( 'model/mSet9.fbx', function ( object ) {
+    loader.load( 'model/mSet10.fbx', function ( object ) {
 
         console.log("object:%o", object);
         //object.children[1].visible = false;
@@ -161,10 +217,9 @@ function init() {
         arrayAction[5].setLoop(THREE.LoopOnce);
         arrayAction[5].clampWhenFinished = true;
 
-        //arrayAction[8] = THREE.AnimationUtils.subclip(arrayAction[8], 'Slide', 1, 30);
-        arrayAction[8].setLoop(THREE.LoopOnce);
-        //arrayAction[8].setDuration(1.0);
-        arrayAction[8].clampWhenFinished = true;
+        //--- Slide
+        arrayAction[9].setLoop(THREE.LoopOnce);
+        arrayAction[9].clampWhenFinished = true;
 
         object.traverse( function ( child ) {
             if ( child.isMesh ) {
@@ -323,6 +378,7 @@ function init() {
             playerBodySquatMesh.castShadow = false
             playerBodySquatMesh.visible = false
             playerBodyMesh.add(playerBodySquatMesh)
+        playerBodyMesh.visible = false;
     scene.add(playerBodyMesh)
     ArrayMesh.push(playerBodyMesh);
 
@@ -500,6 +556,7 @@ function init() {
     c_player.isGrounded = false;
     c_player.isOnSlope = false;
     c_player.isJump = false;
+    c_player.isCrouch = false;
     c_player.slidingPressedTime = -1;
     c_player.isSliding = false;
 
@@ -537,8 +594,10 @@ function init() {
     const gui = new GUI();
     props = {
         //showAxes: true,
-        showCollision: true,
+        showCollision: false,
         showShadow: false,
+        rayCast: false,
+        hitSound: false,
         //pointerLock: false,
     };
     //gui.add( props, 'showAxes').name('Show axes')
@@ -555,7 +614,12 @@ function init() {
             DocumentExitPointerLock(document);
         }
       })*/
-
+    gui.add( props, 'rayCast').name('Ray cast').onChange( value => {
+        
+        })
+    gui.add( props, 'hitSound').name('Hit sound').onChange( value => {
+        
+        })
 
     const clock = new THREE.Clock();
     let delta
@@ -567,9 +631,9 @@ function init() {
     let playerPlaneMoveDistance = new THREE.Vector3(0,0,0)
     let t = 0;
     let lastGroundedTime = -1; //performance.now();
-
+    let camera_dir = new THREE.Vector3();
     let eventQueue = new RAPIER.EventQueue(true);
-    
+    let ArrayHitMesh = new Array();
 
     tick();
     function tick() {
@@ -643,6 +707,41 @@ function init() {
                 //console.log("c_player.isOnSlope:", c_player.isOnSlope)
             //}
 
+            if(props.rayCast){
+                //console.log("camera pos:", camera.position)
+                //let camera_dir = new THREE.Vector3();
+                camera.getWorldDirection(camera_dir)
+                //console.log("camera dir:", camera_dir)
+
+                let cp = camera.position;
+                let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, { x: camera_dir.x, y: camera_dir.y, z: camera_dir.z });
+                let maxToi = grid_size*grid_num;
+                let solid = false;
+
+                let hit = world.castRay(ray, maxToi, solid);
+                if (hit != null) {
+                    // The first collider hit has the handle `hit.colliderHandle` and it hit after
+                    // the ray travelled a distance equal to `ray.dir * toi`.
+                    let hitPoint = ray.pointAt(hit.timeOfImpact); // Same as: `ray.origin + ray.dir * toi`
+                    //console.log("Collider", hit.collider, "hit at point", hitPoint);
+                    //console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                    if(hit.timeOfImpact >= mCameraOffset.dz){
+                        const hitMesh = new THREE.Mesh(new THREE.SphereGeometry(playerRadius*0.1), new THREE.MeshBasicMaterial({color: 'orange'}))
+                        hitMesh.position.set(hitPoint.x, hitPoint.y, hitPoint.z);
+                        ArrayHitMesh.push(hitMesh);
+                        scene.add(hitMesh)
+                        if(ArrayHitMesh.length>100){
+                            let delMesh = ArrayHitMesh[0];
+                            scene.remove(delMesh);
+                            ArrayHitMesh.shift();
+                        }
+                        if(props.hitSound){
+                            mPlayAudioBuffer(mArrayAudio[0]);
+                        }
+                    }//
+                }
+            }//
+
         }
 
         let current_game_time = new Date().getTime();
@@ -669,6 +768,10 @@ function init() {
             */
 
             //console.log("dTime:" + (currentTime - lastGroundedTime) )
+
+            if( playerBody.translation().y < -gridH_size ){ // init
+                playerBody.setTranslation({ x: 0.0, y: gridH_size, z: 1.0 }, true)
+            }
 
             if(current_game_time > lastGroundedTime + 10  ){ // Fall
                 //console.log("Fall:")
@@ -749,9 +852,17 @@ function init() {
             }
 
             if(movement.back){
-                arrayAction[2].play();
+                //arrayAction[2].play();
+                if(!c_player.isCrouch){
+                    arrayAction[8].stop();
+                    arrayAction[2].play();
+                }else{
+                    arrayAction[2].stop();
+                    arrayAction[8].play();
+                }
             }else{
                 arrayAction[2].stop();
+                arrayAction[8].stop();
             }
 
             if( movement.left && !movement.forward && !movement.back){
@@ -766,7 +877,7 @@ function init() {
                 arrayAction[4].stop();
             }   
 
-            if( current_game_time > c_player.slidingPressedTime + 500 && c_player.slidingPressedTime > 0 ){
+            if( current_game_time > c_player.slidingPressedTime + 300 && c_player.slidingPressedTime > 0 ){
                 c_player.isSliding = true;
                 //c_player.slidingPressedTime = -1;
             }
@@ -774,13 +885,13 @@ function init() {
             if(c_player.isSliding){
                 console.log('c_player.isSliding:'+c_player.isSliding);
                 arrayAction[1].stop();
-                if(!arrayAction[8].isRunning()){
-                    arrayAction[8].play();
+                if(!arrayAction[9].isRunning()){
+                    arrayAction[9].play();
                 }
                 mSetPlayerColliderCrouch(true)
             }else{
                 //console.log('c_player.isSliding:'+c_player.isSliding);
-                arrayAction[8].stop();
+                arrayAction[9].stop();
                 if(!c_player.isCrouch){
                     mSetPlayerColliderCrouch(false)
                 }
@@ -922,6 +1033,8 @@ function init() {
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
         //console.log(width);
+
+        mDraw2Dcontext()
     }
 
     //Pointer lock
@@ -969,28 +1082,42 @@ function init() {
     }
     
     //---Description
-    //const canvas2d = document.querySelector( '#canvas-2d' );
-    var W_ = canvas2d.width;
-    var H_ = canvas2d.height;
-    console.log("canvas2d:"+W_+", "+H_)
-    canvas2d.setAttribute("width", width);
-    canvas2d.setAttribute("height", height);
-    W_ = canvas2d.width;
-    H_ = canvas2d.height;
-    console.log("canvas2d:"+W_+", "+H_)
+    function mDraw2Dcontext(){
+        //const canvas2d = document.querySelector( '#canvas-2d' );
+        var W_ = canvas2d.width;
+        var H_ = canvas2d.height;
+        console.log("canvas2d:"+W_+", "+H_)
+        canvas2d.setAttribute("width", width);
+        canvas2d.setAttribute("height", height);
+        W_ = canvas2d.width;
+        H_ = canvas2d.height;
+        console.log("canvas2d:"+W_+", "+H_)
 
-    const context2d = canvas2d.getContext('2d');
-    let fontSize = W_/100;
-    context2d.font = fontSize + 'px Bold Arial';
-    context2d.fillStyle = "white"
-    context2d.textAlign = "center"
-    context2d.fillText(
-        "P: pointer lock,  WASD: move,  Space: jump,  Shift: crouch,  Shift(long): slide",
-         W_/2, fontSize);
-    context2d.fillText(
-        "Mouse move: player's view direction",
-        W_/2, fontSize*2);         
-    //context2d.fillStyle = "blue"
-    //context2d.fillRect(100, 100, 1000, 1000);
+        const context2d = canvas2d.getContext('2d');
+        let fontSize = W_/100;
+        context2d.font = fontSize + 'px Bold Arial';
+        context2d.fillStyle = "white"
+        context2d.textAlign = "center"
+        context2d.fillText(
+            "P: pointer lock,  WASD: move,  Space: jump,  Shift: crouch,  Shift(long): slide",
+            W_/2, fontSize);
+        context2d.fillText(
+            "Mouse move: player's view direction",
+            W_/2, fontSize*2);         
+        //context2d.fillStyle = "blue"
+        //context2d.fillRect(100, 100, 1000, 1000);
+
+        let w_ = W_ / 50;
+        context2d.strokeStyle = "white"
+        context2d.lineWidth = 1;
+        context2d.beginPath();
+        context2d.moveTo(W_/2, H_/2-w_);
+        context2d.lineTo(W_/2, H_/2+w_);
+        context2d.moveTo(W_/2-w_, H_/2);
+        context2d.lineTo(W_/2+w_, H_/2);
+        context2d.closePath();
+        context2d.stroke();
+    }
+    mDraw2Dcontext()
 
 }//init
