@@ -38,6 +38,8 @@ function init() {
     function loadAudios() {
         let promises = [
             loadAudio('/mTPS-game-sample/sound/bullet-hit-001.mp3'),
+            loadAudio('/mTPS-game-sample/sound/handgun.mp3'),
+            loadAudio('/mTPS-game-sample/sound/build-destory.mp3'),
         ];
         Promise.all(promises).then(audioBuffers => {
             
@@ -66,9 +68,7 @@ function init() {
     }
 
 
-
-
-
+    
     let width = window.innerWidth;
     let height = window.innerHeight;
     const canvas2d = document.querySelector( '#canvas-2d' );
@@ -97,6 +97,10 @@ function init() {
     renderer.shadowMap.enabled = true;
     console.log(window.devicePixelRatio);
     console.log(width+", "+height);
+
+    let resolution;
+    resolution = new THREE.Vector2();
+    renderer.getSize(resolution);
  
     const scene = new THREE.Scene();
 
@@ -113,8 +117,13 @@ function init() {
     mCameraOffset.dy = mScale*0.6; //1.4
     mCameraOffset.dz = mScale*1.6; //1000*1.6;
     
-    function mSetCameraPosition(camera, offset, model){
-        let p = model.position;
+    function mSetCameraPosition(camera, offset, player){
+
+        if(!player.playerMesh){
+            return
+        }
+
+        let p = player.playerMesh.position //model.position;
         let dx = offset.dx; // 1000*0.1;
         let dy = offset.dy; //1000*1.4;
         let dz = offset.dz; //1000*1.6;
@@ -124,9 +133,9 @@ function init() {
         //camera.position.set(p.x + dx, p.y + dy, p.z + dz);
         //camera.lookAt(new THREE.Vector3(p.x + dx, p.y + dy, p.z));
 
-        if(c_player){    
-            let a1 = c_player.angle;
-            let a2 = -c_player.angle2;
+        if(player){    
+            let a1 = player.angle;
+            let a2 = -player.angle2;
             camera.position.set(
                 p.x + ( Math.sin(a1) * Math.cos(a2) * dz + Math.cos(a1) * dx ), 
                 p.y + dy + dz * Math.sin(a2), 
@@ -136,21 +145,43 @@ function init() {
             camera.rotation.order = "YXZ";
             camera.rotation.y =  a1;// - Math.PI/2;
             camera.rotation.x = -a2;
+
+            /*if(player.weaponMesh){
+                let dx = mWeaponOffset.dx; // 1000*0.1;
+                let dy = mWeaponOffset.dy; //1000*1.4;
+                let dz = mWeaponOffset.dz; 
+                let ddy = 0.1;
+                player.weaponMesh.position.set(
+                    dx, 
+                    dy *(1-ddy) + dz * Math.sin(-a2) + dy*ddy*Math.cos(-a2), 
+                    Math.cos(-a2) * dz + dy*ddy*Math.sin(-a2)
+                );
+                player.weaponMesh.rotation.x = a2;
+
+            }*/
         }
+
+        // weapon
+        playerPiv1.position.y = dy;
     }
 
     //--- Light ---//
+    let light_pos0 = new THREE.Vector3();
+    light_pos0.x = 0;
+    light_pos0.y = gridH_size* grid_num;
+    light_pos0.z = grid_size*3;
     const light = new THREE.DirectionalLight(0xFFFFFF);
-    light.position.set(0, gridH_size* grid_num, grid_size*3);
+    light.position.set(light_pos0.x, light_pos0.y, light_pos0.z);
     light.intensity = 1; 
-    light.castShadow = false; //true;
+    light.castShadow = true; //false; //
     console.log("light.shadow.camera:%o", light.shadow.camera);
-    light.shadow.camera.top *= grid_size * grid_num ;
-    light.shadow.camera.bottom *= grid_size * grid_num ;
-    light.shadow.camera.left *= grid_size * grid_num ;
-    light.shadow.camera.right *= grid_size * grid_num ;
-    light.shadow.mapSize.width = 1024 * 16
-    light.shadow.mapSize.height = 1024 * 16
+    let s_ = grid_size * grid_num *0.3;
+    light.shadow.camera.top *= s_;
+    light.shadow.camera.bottom *= s_;
+    light.shadow.camera.left *= s_;
+    light.shadow.camera.right *= s_;
+    light.shadow.mapSize.width = 1024 * 8
+    light.shadow.mapSize.height = 1024 * 8
     //light.shadow.camera.near = gridH_size*grid_num
     light.shadow.camera.far = gridH_size*grid_num*1.3;
     scene.add(light);
@@ -186,17 +217,22 @@ function init() {
     let playerRadius = 0.35 * mScale;
     //playerMesh.castShadow = true;
     //playerMesh.receiveShadow = true;
+    let playerPiv1 = new THREE.Group();
 
-    let model = null;
+    //let model = null;
     //let mAxes = null;
     
     let mixer;
     let props, lastAnimID;
-    let arrayAction = new Array(10); //[];
-    let mAnimOrder = {Idle:0, RunForward:1, RunBack:2, RunLeft:3, RunRight:4, Jump:5, CrouchIdle:6, CrouchForward:7, CrouchBack:8, Slide:9};
+    let arrayAction = new Array(30); //[];
+    let mAnimOrder = {Idle:0, RunForward:1, RunBack:2, RunLeft:3, RunRight:4, 
+                    Jump:5, 
+                    CrouchIdle:6, CrouchForward:7, CrouchBack:8,  CrouchLeft:9,  CrouchRight:10,  
+                    Slide:11,
+                    ShootIdle:12, ShootStand: 13, ShootCrouch:14 };
     let model_scale = mScale*0.01;  // 10;
     const loader = new THREE.FBXLoader();
-    loader.load( 'model/mSet10.fbx', function ( object ) {
+    loader.load( 'model/mSet14.fbx', function ( object ) {
 
         console.log("object:%o", object);
         //object.children[1].visible = false;
@@ -218,8 +254,8 @@ function init() {
         arrayAction[5].clampWhenFinished = true;
 
         //--- Slide
-        arrayAction[9].setLoop(THREE.LoopOnce);
-        arrayAction[9].clampWhenFinished = true;
+        arrayAction[11].setLoop(THREE.LoopOnce);
+        arrayAction[11].clampWhenFinished = true;
 
         object.traverse( function ( child ) {
             if ( child.isMesh ) {
@@ -227,25 +263,76 @@ function init() {
                 child.receiveShadow = true;
             }
         } );
-
-        //--- Axis ---//
-        /*const size = mScale*0.1;
-        mAxes = new THREE.AxesHelper(size);
-        mAxes.position.x =  0;
-        mAxes.position.y = mScale*1.0; 
-        //mAxes.position.y = 2000; 
-        playerMesh.add(mAxes);*/
-
-        //object.position.set(0, 0, 0);
-        //scene.add( object );
+        c_player.model = object;
+        c_player.playerMesh = playerMesh;
 
         object.scale.set(model_scale, model_scale, model_scale);
         object.position.set(0, -playerRadius*2.5, 0);
         playerMesh.add(object);
         scene.add( playerMesh );
 
-        mSetCameraPosition(camera, mCameraOffset, playerMesh);
+        playerPiv1.position.set(-mCameraOffset.dx, mCameraOffset.dy, 0);
+        playerMesh.add(playerPiv1);
+        
+        const size = mScale*0.2;
+        let ax = new THREE.AxesHelper(size);
+        ax.visible = false;
+        playerPiv1.add(ax);
+        
+        mSetCameraPosition(camera, mCameraOffset, c_player); //playerMesh
     } );
+
+    let weaponMesh = new THREE.Group();
+    let mWeaponOffset = new Object();
+    mWeaponOffset.dx = -mCameraOffset.dx; //mScale*-0.2;
+    mWeaponOffset.dy = mCameraOffset.dy *0.73; //mScale*0.5; //1.4
+    mWeaponOffset.dz = -mCameraOffset.dz*0.9; //mScale*0.5; //1000*1.6;
+    let muzzlePos = new THREE.Object3D();
+
+    loader.load( 'model/Scar_L01.fbx', function ( object ) {
+
+        console.log("object:%o", object);
+
+        object.traverse( function ( child ) {
+            if ( child.isMesh ) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        } );
+        object.scale.set(0.002, 0.002, 0.002);
+        //object.position.set(-0.2, 0.5, 0.5);
+
+        weaponMesh.add(object)
+        weaponMesh.visible = false;
+        c_player.weaponMesh = weaponMesh;
+        /*weaponMesh.position.set(mWeaponOffset.dx, mWeaponOffset.dy, mWeaponOffset.dz);
+        playerMesh.add(weaponMesh);*/
+
+        weaponMesh.position.set(0, -0.16, mWeaponOffset.dz);
+        playerPiv1.add(weaponMesh);
+
+        muzzlePos.position.set(0, -0.16, mWeaponOffset.dz*0.6);
+        playerPiv1.add(muzzlePos);
+        
+    } );
+
+    /*const loaderW = new THREE.GLTFLoader();
+    const url = '/mTPS-game-sample/model/no0.glb';
+    loaderW.load(
+        url, 
+        function ( gltf ){
+            model = gltf.scene;
+            model.name = "model_with_cloth";
+            model.scale.set(model_scale, model_scale, model_scale);
+            model.position.set(0, 0, 0);
+            playerMesh.add(model);
+
+        },
+        function ( error ) {
+            console.log( 'An error happened' );
+            //console.log( error );
+        }
+    );*/
 
 
     //--- Global Axis ---//
@@ -272,10 +359,12 @@ function init() {
 
     let ArrayMesh = [];
     let ArrayBody = [];
-    let mBuildMaterial = new THREE.MeshLambertMaterial({color: 0x6699FF})
+    let mMaterial = new THREE.MeshLambertMaterial({color: 0x6699FF});
+    mMaterial.transparent = true;
+    mMaterial.opacity = 1.0;
 
     //--- Cube
-    const cubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mBuildMaterial)
+    const cubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mMaterial)
     cubeMesh.castShadow = true
     scene.add(cubeMesh)
         const cubeBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(grid_size*0, 1, -grid_size))
@@ -284,7 +373,7 @@ function init() {
     ArrayMesh.push(cubeMesh);
     ArrayBody.push(cubeBody);
 
-    const cubeMesh1 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mBuildMaterial)
+    const cubeMesh1 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mMaterial)
     cubeMesh1.castShadow = true
     scene.add(cubeMesh1)
         const cubeBody1 = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(grid_size*1, 0.5, -grid_size))
@@ -293,7 +382,7 @@ function init() {
     ArrayMesh.push(cubeMesh1);
     ArrayBody.push(cubeBody1);
 
-    const cubeMesh2 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mBuildMaterial)
+    const cubeMesh2 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mMaterial)
     cubeMesh2.castShadow = true
     scene.add(cubeMesh2)
         const cubeBody2 = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(grid_size*2, 2.5, -grid_size))
@@ -302,21 +391,61 @@ function init() {
     ArrayMesh.push(cubeMesh2);
     ArrayBody.push(cubeBody2);
 
+    let ArrayBuild = [];
+    let build_id = 0;
+
+    function mCreateWall(px, py, pz, type="z"){
+        let Lx = grid_size;
+        let Ly = gridH_size;
+        let Lz = buildThick;
+        if(type == "x"){
+            Lz = grid_size;
+            Lx = buildThick;
+        }
     
-    function mCreateWall(px, py, pz){    
-        const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(grid_size, gridH_size, buildThick), mBuildMaterial)
-        wallMesh.castShadow = true
+        let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        mat.transparent = true;
+        mat.opacity = 1.0;
+    
+        const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), mat)
+        wallMesh.castShadow = true;
+        wallMesh.receiveShadow = true;
         scene.add(wallMesh)
             const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz))
-            const wallShape = RAPIER.ColliderDesc.cuboid(grid_size/2, gridH_size/2, buildThick/2).setMass(1).setRestitution(0.0).setFriction(0.0)
-            world.createCollider(wallShape, wallBody)
+            const wallShape = RAPIER.ColliderDesc.cuboid(Lx/2, Ly/2, Lz/2).setMass(1).setRestitution(0.0).setFriction(0.0)
+            let col = world.createCollider(wallShape, wallBody)
+            col.build_id = build_id;
+            //console.log("col:%o", col);
         ArrayMesh.push(wallMesh);
         ArrayBody.push(wallBody);
+        
+        mAddBuild(col, wallMesh, wallBody)
+        build_id += 1; 
+    }
+
+    function mAddBuild(col, mesh, body){
+        let b = new Object();
+        b.build_id = build_id;
+        b.collider = col;
+        b.buildMesh = mesh;
+        b.body = body;
+        b.maxHealth = 150;
+        b.health = 150;
+        //ArrayBuild[col.handle] = b;
+        ArrayBuild[build_id] = b;
     }
 
     mCreateWall(-grid_size*2+grid_size/2, gridH_size/2, -grid_size*2)
     mCreateWall(-grid_size*3+grid_size/2, gridH_size/2, -grid_size*2)
+    for(var i=0; i<grid_num; i++){
+        mCreateWall(grid_size*(-i), gridH_size/2, grid_size*1+grid_size/2, "x")
+    }
+    for(var i=-grid_num; i<grid_num; i++){
+        mCreateWall(grid_size*i+grid_size/2, gridH_size/2, -grid_size*grid_num)
+    }
+    
 
+    //console.log("ArrayBuild:%o", ArrayBuild);
 
     function mCreateSlope(px, py, pz, type="z-"){
         console.log("mCreateSlope:"+type)
@@ -325,8 +454,14 @@ function init() {
         let Lx = grid_size
         let Ly = buildThick
         let Lz = L
-        const slopeMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), mBuildMaterial)
+
+        let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        mat.transparent = true;
+        mat.opacity = 1.0;
+
+        const slopeMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), mat)
         slopeMesh.castShadow = true
+        slopeMesh.receiveShadow = true;
         scene.add(slopeMesh)
             let a = Math.acos(grid_size/L)
             if(type==="z+"){
@@ -340,10 +475,14 @@ function init() {
             const slopeBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz).setRotation({ w: w, x: x, y: y, z: z }))
             const slopeShape = RAPIER.ColliderDesc.cuboid(grid_size/2, buildThick/2, L/2).setMass(1).setRestitution(0.0).setFriction(0.0)
             const slopeCollider = world.createCollider(slopeShape, slopeBody)
+            slopeCollider.build_id = build_id;
         ArrayMesh.push(slopeMesh);
         ArrayBody.push(slopeBody);
 
-        console.log("slopeCollider.handle:", slopeCollider.handle)
+        //console.log("slopeCollider.handle:", slopeCollider.handle)
+
+        mAddBuild(slopeCollider, slopeMesh, slopeBody)
+        build_id += 1; 
     }
 
     mCreateSlope(-grid_size*5+grid_size/2, gridH_size/2, -grid_size*1+grid_size/2, "z+")
@@ -353,14 +492,23 @@ function init() {
     mCreateSlope(-grid_size*4+grid_size/2, gridH_size*2+gridH_size/2, -grid_size*4+grid_size/2)
 
     function mCreateFloor(px, py, pz){    
-        const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(grid_size, buildThick, grid_size), mBuildMaterial)
+        let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        mat.transparent = true;
+        mat.opacity = 1.0;
+
+        const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(grid_size, buildThick, grid_size), mat)
         floorMesh.castShadow = true
+        floorMesh.receiveShadow = true;
         scene.add(floorMesh)
             const floorBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz))
             const floorShape = RAPIER.ColliderDesc.cuboid(grid_size/2, buildThick/2, grid_size/2).setMass(1).setRestitution(0.0).setFriction(0.0)
-            world.createCollider(floorShape, floorBody)
+            const floorCollider = world.createCollider(floorShape, floorBody)
+            floorCollider.build_id = build_id;
         ArrayMesh.push(floorMesh);
         ArrayBody.push(floorBody);
+
+        mAddBuild(floorCollider, floorMesh, floorBody)
+        build_id += 1; 
     }
 
     mCreateFloor(-grid_size*4+grid_size/2, gridH_size*3, -grid_size*5+grid_size/2)
@@ -409,10 +557,7 @@ function init() {
             playerBody.setGravityScale(1/g_scale, true);
             playerCollider.setFriction(0.0)
         }
-        //if(mixer){
-        //    arrayAction[0].stop();
-        //    arrayAction[5].play();
-        //}
+        
     }
 
     function mPlayerIsGrounded(){
@@ -524,6 +669,20 @@ function init() {
             
         }
     
+        if(event.key === 'f'  && event.type === 'keydown'){
+            if(c_player){
+                c_player.weapon = 0;
+                //weaponMesh.visible = false;
+                console.log('c_player.weapon:', c_player.weapon);
+            }
+        }
+        /*if(event.key === '1'  && event.type === 'keydown'){
+            if(c_player){
+                c_player.weapon = 1;
+                weaponMesh.visible = true;
+                console.log('c_player.weapon:', c_player.weapon);
+            }
+        }*/
         
         if(keyEnabledArray[event.keyCode] && event.type === 'keydown') {
             keyEnabledArray[event.keyCode] = false;
@@ -559,6 +718,12 @@ function init() {
     c_player.isCrouch = false;
     c_player.slidingPressedTime = -1;
     c_player.isSliding = false;
+    c_player.weapon = 0;
+    c_player.isFiring = false;
+    c_player.lastFiringTime = -1;
+    c_player.firingMesh = null;
+    c_player.model = null;
+
 
     canvas2d.addEventListener('mousemove', function(e)
     {
@@ -569,15 +734,12 @@ function init() {
             var ang_ = (e.movementX) * mMouseSenseX * Math.PI/2;
             var ang2_ = (e.movementY) * mMouseSenseY * Math.PI/2;
 
-            /*
-            if(camera.zoom==2){
+            
+            if(camera.zoom > 1 ){
                 ang_ *= 0.5;
                 ang2_ *= 0.5
             }
-            else if(camera.zoom==10){
-                ang_ *= 0.5
-                ang2_ *= 0.5
-            }*/
+            
 
             //console.log("ang_:"+ang_);
             c_player.angle -= ang_;
@@ -586,16 +748,78 @@ function init() {
             c_player.angle2 = Math.min( Math.PI/2, c_player.angle2);
             //console.log("c_player.angle:"+c_player.angle/Math.PI*180);
             //console.log("c_player.angle2:"+c_player.angle2/Math.PI*180);
+            //c_player.weaponMesh.rotation.x = -c_player.angle2;
+            playerPiv1.rotation.x = -c_player.angle2;
         }
         
     });
+
+    canvas2d.addEventListener('mousedown', function(e)
+    {
+        //console.log('mousedown')
+
+        if(c_player){
+
+            //if(c_player.mode==1){ //(mMode==1){
+                if(e.button==0){
+                    if((c_player.weapon!=5) ){ // (c_player.weapon<=3)   //(c_player.weapon<=4)||(c_player.weapon==6)
+                        //movement['shoot'] = true;
+                        //ws.send("shoot " + 1);
+                        c_player.isFiring = true;
+                        //c_player.lastFiringTime = -1;
+                        //console.log("c_player.isFiring:"+c_player.isFiring);
+                    }
+                    
+                }//    
+                else if(e.button==2){
+                    camera.zoom = 3; //1.001;
+                    camera.updateProjectionMatrix();
+                    c_player.model.visible = false;
+                    c_player.weaponMesh.visible = true;
+                }  
+                
+            //}//
+           
+            if( (e.button==2) ){
+                //ws.send('scope '+ 1)
+            }
+
+        }//c_player
+
+    });
+
+    canvas2d.addEventListener('mouseup', function(e)
+    {
+        if(c_player){
+
+            if(e.button==0){
+                //movement['shoot'] = false;
+                //socket.emit('movement', movement);
+                //ws.send("shoot " + 0);
+                c_player.isFiring = false;
+                //c_player.lastFiringTime = new Date().getTime();
+                //console.log("c_player.isFiring:"+c_player.isFiring);
+                
+            }//
+
+            if(e.button==2){
+                camera.zoom = 1;
+                camera.updateProjectionMatrix();
+                //socket.emit('readyShoot', 0);
+                c_player.model.visible = true;
+                c_player.weaponMesh.visible = false;
+            }
+
+        }//
+    });
+
 
 
     const gui = new GUI();
     props = {
         //showAxes: true,
         showCollision: false,
-        showShadow: false,
+        showShadow: true,
         rayCast: false,
         hitSound: false,
         //pointerLock: false,
@@ -625,6 +849,7 @@ function init() {
     let delta
     let player_speed = mScale * 5; // [/ms]
     let last_game_time = new Date().getTime(); //[ms]
+    let current_game_time = new Date().getTime(); //[ms]
     let playerLastPosition = new THREE.Vector3(0,0,0)
     let playerNewPosition = new THREE.Vector3(0,0,0)
     let playerMoveDirection = new THREE.Vector3(0,0,0)
@@ -635,168 +860,60 @@ function init() {
     let eventQueue = new RAPIER.EventQueue(true);
     let ArrayHitMesh = new Array();
 
-    tick();
-    function tick() {
-        stats.begin();
+    let line_geo = new THREE.LineSegmentsGeometry();
+    let matLine = new THREE.LineMaterial( {
+        color: "orange", //0xffffff, does not work
+        linewidth: 5, // in world units with size attenuation, pixels otherwise
+        vertexColors: true,
+        resolution,  // to be set by renderer, eventually
+        dashed: false,
+        alphaToCoverage: true,
+    } );
+    let node_vertices = [];
+    let colors = [];
+    colors.push( 255, 255, 255 );
+    colors.push( 255, 255, 255 );
 
-        //let currentTime = performance.now();
+    function mSetPlayerAnimation(){
 
-        delta = clock.getDelta()
-        if (world) {
-            playerLastPosition.copy(playerNewPosition)
-
-            //delta_world = clock.getDelta()
-            world.timestep = Math.min(delta, 0.01)
-            world.step(eventQueue)
-            //console.log("delta:%o", delta)
-            //console.log("world:%o", world)
-            //console.log("d_world:"+dt_world)
-
-            playerNewPosition.copy(playerBody.translation())
-
-            for(var i = 0; i < ArrayMesh.length; i++){
-                ArrayMesh[i].position.copy(ArrayBody[i].translation())
-                ArrayMesh[i].quaternion.copy(ArrayBody[i].rotation())
-            }
-          
-            playerMesh.position.copy(playerBody.translation())
-            //playerMesh.quaternion.copy(playerBody.rotation())
-            //console.log("sphereBody.position:%o", sphereBody.position)
-            //console.log("playerBody.translation:%o", playerBody.translation())
-            //console.log("playerBody.translation:%o", playerBody.translation().x)
-
-            //playerMesh.position.copy(playerBody.position)
-            //if( t%10 == 0){
-            //  console.log("playerBody.position:%o", playerBody.position)
-            //}
-
-            //if( t%100 == 0){
-                //c_player.isGrounded = false;
-                //c_player.isOnSlope = false;
-                
-                eventQueue.drainContactForceEvents(event => {
-                    //console.log("event:")
-                    let handle1 = event.collider1(); // Handle of the first collider involved in the event.
-                    let handle2 = event.collider2(); // Handle of the second collider involved in the event.
-                    // Handle the contact force event. 
-                    //console.log("contact:%o, %o", handle1, handle2)
-                    //console.log("contact:%o", event.totalForce())
-                    let time_now = new Date().getTime(); //performance.now();
-                    for(var i = 0; i < ArrayPlayerCollider.length; i++){
-                        let h = ArrayPlayerCollider[i].handle
-                        //if(handle1==playerCollider.handle || handle2==playerCollider.handle){
-                        if(handle1==h || handle2==h){
-                            //console.log("contact:%o", event.totalForce())
-                            if(event.totalForce().y > 1 && time_now > lastJumpTime + 100  ){ // 
-                                //lastGroundedTime = performance.now();
-                                lastGroundedTime = time_now;
-                                c_player.isGrounded = true;
-                            
-                                if( Math.abs(event.totalForce().x) > 1.0 || Math.abs(event.totalForce().z) > 1.0){
-                                    c_player.isOnSlope = true;
-                                }else{
-                                    c_player.isOnSlope = false;
-                                }
-                            }
-                        }
-                    } //i
-                        
-                });
-                
-                //console.log("c_player.isGrounded:", c_player.isGrounded)
-                //console.log("c_player.isOnSlope:", c_player.isOnSlope)
-            //}
-
-            if(props.rayCast){
-                //console.log("camera pos:", camera.position)
-                //let camera_dir = new THREE.Vector3();
-                camera.getWorldDirection(camera_dir)
-                //console.log("camera dir:", camera_dir)
-
-                let cp = camera.position;
-                let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, { x: camera_dir.x, y: camera_dir.y, z: camera_dir.z });
-                let maxToi = grid_size*grid_num;
-                let solid = false;
-
-                let hit = world.castRay(ray, maxToi, solid);
-                if (hit != null) {
-                    // The first collider hit has the handle `hit.colliderHandle` and it hit after
-                    // the ray travelled a distance equal to `ray.dir * toi`.
-                    let hitPoint = ray.pointAt(hit.timeOfImpact); // Same as: `ray.origin + ray.dir * toi`
-                    //console.log("Collider", hit.collider, "hit at point", hitPoint);
-                    //console.log("hit.timeOfImpact:", hit.timeOfImpact);
-                    if(hit.timeOfImpact >= mCameraOffset.dz){
-                        const hitMesh = new THREE.Mesh(new THREE.SphereGeometry(playerRadius*0.1), new THREE.MeshBasicMaterial({color: 'orange'}))
-                        hitMesh.position.set(hitPoint.x, hitPoint.y, hitPoint.z);
-                        ArrayHitMesh.push(hitMesh);
-                        scene.add(hitMesh)
-                        if(ArrayHitMesh.length>100){
-                            let delMesh = ArrayHitMesh[0];
-                            scene.remove(delMesh);
-                            ArrayHitMesh.shift();
-                        }
-                        if(props.hitSound){
-                            mPlayAudioBuffer(mArrayAudio[0]);
-                        }
-                    }//
-                }
-            }//
-
-        }
-
-        let current_game_time = new Date().getTime();
-        let dt = current_game_time - last_game_time;
-        //console.log("dt:"+dt);
-        last_game_time = current_game_time;
-
-        t += 1;
-          
-        
-        
-        //const delta = clock.getDelta();
         if ( mixer ) {
             mixer.update( delta );
 
-            //let time_now = performance.now();
+            /*if(c_player.weapon == 1){
+                arrayAction[0].stop();
+                arrayAction[6].stop();
+                if(!c_player.isCrouch){
+                    arrayAction[14].stop();
+                    if(c_player.isFiring){
+                        arrayAction[13].play();
+                        //console.log('play')
+                    }else{
+                        arrayAction[13].play();
+                        arrayAction[13].reset();
+                    }
+                }else{
+                    let wx = mWeaponOffset.dx;
+                    let wy = mWeaponOffset.dy;
+                    let wz = mWeaponOffset.dz;
+                    weaponMesh.position.set(wx,wy*0,wz);
+                    arrayAction[13].stop();
+                    if(c_player.isFiring){
+                        arrayAction[14].play();
+                    }else{
+                        arrayAction[14].play();
+                        arrayAction[14].reset();
+                    }
+                }
+
+                return
+            }else{
+                arrayAction[13].stop();
+                arrayAction[14].stop();
+                //arrayAction[0].play();
+                //arrayAction[13].reset();
+            }*/
+
         
-            /*
-            let s = playerBody.linvel();
-            //console.log("s:", s)
-            if(s.y < -10){
-                playerBody.setLinvel({ x: s.x, y: -10, z: s.z}, true);
-            }
-            */
-
-            //console.log("dTime:" + (currentTime - lastGroundedTime) )
-
-            if( playerBody.translation().y < -gridH_size ){ // init
-                playerBody.setTranslation({ x: 0.0, y: gridH_size, z: 1.0 }, true)
-            }
-
-            if(current_game_time > lastGroundedTime + 10  ){ // Fall
-                //console.log("Fall:")
-                c_player.isGrounded = false;
-                c_player.isOnSlope = false;
-                mPlayerIsNotGrounded()
-            }
-
-            
-            if(c_player.isJump){
-                console.log('jump');
-                c_player.isGrounded = false;
-                c_player.isOnSlope = false;
-                mPlayerIsNotGrounded()
-                let vx = playerBody.linvel().x;
-                let vy = playerBody.linvel().y;
-                let vz = playerBody.linvel().z;
-                //playerBody.setLinvel({ x: vx, y: 0, z: vz}, true);
-                //playerBody.applyImpulse({ x: vx, y: 6, z: vz }, true);
-                playerBody.applyImpulse({ x: 0.0, y: 6, z: 0.0 }, true);
-                lastJumpTime = new Date().getTime(); // performance.now();
-                
-                c_player.isJump = false;
-            }
-
             if( c_player.isGrounded ){
                 mPlayerIsGrounded()
                 lastGroundedTime = current_game_time //currentTime
@@ -811,10 +928,10 @@ function init() {
                     arrayAction[5].play();
                 }
             }
-
+    
             //console.log("c_player.isGrounded:"+c_player.isGrounded)
             //console.log("currentTime:" + currentTime +" lastGroundedTime:"+lastGroundedTime)
-
+    
             
             if( (!movement.forward) && (!movement.back) && (!movement.left) && (!movement.right) ){
                 if(!c_player.isCrouch){
@@ -825,7 +942,7 @@ function init() {
                         arrayAction[0].play();
                     }
                 }else{
-                    console.log("crouch")
+                    //console.log("crouch")
                     if(arrayAction[0].isRunning()){
                         arrayAction[0].stop();
                     }
@@ -837,7 +954,7 @@ function init() {
                 arrayAction[0].stop();
                 arrayAction[6].stop();
             }
-
+    
             if(movement.forward){
                 if(!c_player.isCrouch){
                     arrayAction[7].stop();
@@ -850,7 +967,7 @@ function init() {
                 arrayAction[1].stop();
                 arrayAction[7].stop();
             }
-
+    
             if(movement.back){
                 //arrayAction[2].play();
                 if(!c_player.isCrouch){
@@ -864,48 +981,225 @@ function init() {
                 arrayAction[2].stop();
                 arrayAction[8].stop();
             }
-
+    
             if( movement.left && !movement.forward && !movement.back){
-                arrayAction[3].play();
+                //arrayAction[3].play();
+                if(!c_player.isCrouch){
+                    arrayAction[9].stop();
+                    arrayAction[3].play();
+                }else{
+                    arrayAction[3].stop();
+                    arrayAction[9].play();
+                }
             }else{
                 arrayAction[3].stop();
+                arrayAction[9].stop();
             }
-
+    
             if( movement.right && !movement.forward && !movement.back){
-                arrayAction[4].play();
+                //arrayAction[4].play();
+                if(!c_player.isCrouch){
+                    arrayAction[10].stop();
+                    arrayAction[4].play();
+                }else{
+                    arrayAction[4].stop();
+                    arrayAction[10].play();
+                }
             }else{
                 arrayAction[4].stop();
+                arrayAction[10].stop();
             }   
-
+    
             if( current_game_time > c_player.slidingPressedTime + 300 && c_player.slidingPressedTime > 0 ){
                 c_player.isSliding = true;
                 //c_player.slidingPressedTime = -1;
             }
-
+    
             if(c_player.isSliding){
-                console.log('c_player.isSliding:'+c_player.isSliding);
+                //console.log('c_player.isSliding:'+c_player.isSliding);
                 arrayAction[1].stop();
-                if(!arrayAction[9].isRunning()){
-                    arrayAction[9].play();
+                if(!arrayAction[11].isRunning()){
+                    arrayAction[11].play();
                 }
                 mSetPlayerColliderCrouch(true)
             }else{
                 //console.log('c_player.isSliding:'+c_player.isSliding);
-                arrayAction[9].stop();
+                arrayAction[11].stop();
                 if(!c_player.isCrouch){
                     mSetPlayerColliderCrouch(false)
                 }
                 
             }
-
-
-            //for(var i=0; i<arrayAction.length; i++){
-            //    console.log("arrayAction["+i+"]:"+arrayAction[i].isRunning() );
-            //}
+    
             
+    
+            //for(var i=0; i<arrayAction.length; i++){
+            //    if(arrayAction[i]){
+            //        console.log("arrayAction["+i+"]:"+arrayAction[i].isRunning() );
+            //    }  
+            //}
+                
+            }// mixer
+    
+
+    }
+
+    tick();
+    function tick() {
+        stats.begin();
+
+        if (world==null){
+            return
         }
+        //if ( mixer ){
+        //}else{
+        //    return
+        //}
+        
+        delta = clock.getDelta()
+        //if (world) {
+
+        playerLastPosition.copy(playerNewPosition)
+
+        //delta_world = clock.getDelta()
+        world.timestep = Math.min(delta, 0.01)
+        world.step(eventQueue)
+        //console.log("delta:%o", delta)
+        //console.log("world:%o", world)
+        //console.log("d_world:"+dt_world)
+
+        playerNewPosition.copy(playerBody.translation())
+
+        for(var i = 0; i < ArrayMesh.length; i++){
+            ArrayMesh[i].position.copy(ArrayBody[i].translation())
+            ArrayMesh[i].quaternion.copy(ArrayBody[i].rotation())
+        }
+        
+        playerMesh.position.copy(playerBody.translation())
+        //playerMesh.quaternion.copy(playerBody.rotation())
+        //console.log("sphereBody.position:%o", sphereBody.position)
+        //console.log("playerBody.translation:%o", playerBody.translation())
+        //console.log("playerBody.translation:%o", playerBody.translation().x)
+
+        //playerMesh.position.copy(playerBody.position)
+        //if( t%10 == 0){
+        //  console.log("playerBody.position:%o", playerBody.position)
+        //}
+
+        //if( t%100 == 0){
+            //c_player.isGrounded = false;
+            //c_player.isOnSlope = false;
+            
+            eventQueue.drainContactForceEvents(event => {
+                //console.log("event:")
+                let handle1 = event.collider1(); // Handle of the first collider involved in the event.
+                let handle2 = event.collider2(); // Handle of the second collider involved in the event.
+                // Handle the contact force event. 
+                //console.log("contact:%o, %o", handle1, handle2)
+                //console.log("contact:%o", event.totalForce())
+                let time_now = new Date().getTime(); //performance.now();
+                for(var i = 0; i < ArrayPlayerCollider.length; i++){
+                    let h = ArrayPlayerCollider[i].handle
+                    //if(handle1==playerCollider.handle || handle2==playerCollider.handle){
+                    if(handle1==h || handle2==h){
+                        //console.log("contact:%o", event.totalForce())
+                        if(event.totalForce().y > 1 && time_now > lastJumpTime + 100  ){ // 
+                            //lastGroundedTime = performance.now();
+                            lastGroundedTime = time_now;
+                            c_player.isGrounded = true;
+                        
+                            if( Math.abs(event.totalForce().x) > 1.0 || Math.abs(event.totalForce().z) > 1.0){
+                                c_player.isOnSlope = true;
+                            }else{
+                                c_player.isOnSlope = false;
+                            }
+                        }
+                    }
+                } //i
+                    
+            });
+            
+            //console.log("c_player.isGrounded:", c_player.isGrounded)
+            //console.log("c_player.isOnSlope:", c_player.isOnSlope)
+        //}
+
+        if(props.rayCast){
+            //console.log("camera pos:", camera.position)
+            //let camera_dir = new THREE.Vector3();
+            camera.getWorldDirection(camera_dir)
+            //console.log("camera dir:", camera_dir)
+
+            let cp = camera.position;
+            let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, { x: camera_dir.x, y: camera_dir.y, z: camera_dir.z });
+            let maxToi = grid_size*grid_num;
+            let solid = false;
+
+            let hit = world.castRay(ray, maxToi, solid);
+            if (hit != null) {
+                // The first collider hit has the handle `hit.colliderHandle` and it hit after
+                // the ray travelled a distance equal to `ray.dir * toi`.
+                let hitPoint = ray.pointAt(hit.timeOfImpact); // Same as: `ray.origin + ray.dir * toi`
+                //console.log("Collider", hit.collider, "hit at point", hitPoint);
+                //console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                if(hit.timeOfImpact >= mCameraOffset.dz){
+                    const hitMesh = new THREE.Mesh(new THREE.SphereGeometry(playerRadius*0.1), new THREE.MeshBasicMaterial({color: 'orange'}))
+                    hitMesh.position.set(hitPoint.x, hitPoint.y, hitPoint.z);
+                    ArrayHitMesh.push(hitMesh);
+                    scene.add(hitMesh)
+                    if(ArrayHitMesh.length>100){
+                        let delMesh = ArrayHitMesh[0];
+                        scene.remove(delMesh);
+                        ArrayHitMesh.shift();
+                    }
+                    if(props.hitSound){
+                        mPlayAudioBuffer(mArrayAudio[0]);
+                    }
+
+                }//
+            }
+        }//
+
+        //}
+
+        current_game_time = new Date().getTime();
+        let dt = current_game_time - last_game_time;
+        //console.log("dt:"+dt);
+        last_game_time = current_game_time;
+
+        t += 1;
+          
+        
+        mSetPlayerAnimation()
+
 
         if (playerMesh != null){
+
+            if( playerBody.translation().y < -gridH_size ){ // init
+                playerBody.setTranslation({ x: 0.0, y: gridH_size, z: 1.0 }, true)
+            }
+    
+            if(current_game_time > lastGroundedTime + 10  ){ // Fall
+                //console.log("Fall:")
+                c_player.isGrounded = false;
+                c_player.isOnSlope = false;
+                mPlayerIsNotGrounded()
+            }    
+
+            if(c_player.isJump){
+                //console.log('jump');
+                c_player.isGrounded = false;
+                c_player.isOnSlope = false;
+                mPlayerIsNotGrounded()
+                let vx = playerBody.linvel().x;
+                let vy = playerBody.linvel().y;
+                let vz = playerBody.linvel().z;
+                //playerBody.setLinvel({ x: vx, y: 0, z: vz}, true);
+                //playerBody.applyImpulse({ x: vx, y: 6, z: vz }, true);
+                playerBody.applyImpulse({ x: 0.0, y: 6, z: 0.0 }, true);
+                lastJumpTime = new Date().getTime(); // performance.now();
+                
+                c_player.isJump = false;
+            }
             
             let move_num = movement.forward + movement.back + movement.left + movement.right;
                 //console.log("move_num:"+move_num);
@@ -999,25 +1293,174 @@ function init() {
             }
 
             c_player.angle_offset = c_player.angle_offset_init;
+            if(c_player.model){
+                c_player.model.rotation.y = 0;
+            }
+            
             if(movement.forward && movement.right){
-                c_player.angle_offset = c_player.angle_offset_init + Math.PI/4;
+                //c_player.angle_offset = c_player.angle_offset_init + Math.PI/4;
+                c_player.model.rotation.y =  -Math.PI/4;
             }else if(movement.forward && movement.left){
-                c_player.angle_offset = c_player.angle_offset_init - Math.PI/4;
+                //c_player.angle_offset = c_player.angle_offset_init - Math.PI/4;
+                c_player.model.rotation.y =  Math.PI/4;
             }else if(movement.back && movement.right){
-                c_player.angle_offset = c_player.angle_offset_init - Math.PI/4;
+                //c_player.angle_offset = c_player.angle_offset_init - Math.PI/4;
+                c_player.model.rotation.y =  Math.PI/4;
             }else if(movement.back && movement.left){
-                c_player.angle_offset = c_player.angle_offset_init + Math.PI/4;
+                //c_player.angle_offset = c_player.angle_offset_init + Math.PI/4;
+                c_player.model.rotation.y =  -Math.PI/4;
             }
 
             playerMesh.rotation.y = c_player.angle - c_player.angle_offset;
 
-            mSetCameraPosition(camera, mCameraOffset, playerMesh);
+            if(c_player.model && c_player.weapon==1 && !c_player.isCrouch){
+                let ang2 = c_player.angle2;
+                c_player.model.traverse(function(obj) {
+                    if(obj.name == "mixamorigSpine"){
+                        //console.log("obj.name:" + obj.name)
+                            obj.rotation.x = -ang2;
+                            //obj.rotation.y = props[Array_v[i*3+1]]/180*3.1415;
+                            //obj.rotation.z = props[Array_v[i*3+2]]/180*3.1415;
+                    }
+                })
+
+                /*let wx = mWeaponOffset.dx;
+                let wz = mWeaponOffset.dz;
+                let wy = mWeaponOffset.dy;
+                let pz = Math.cos(ang2) * wz - Math.sin(ang2) * wy;
+                let py = Math.sin(ang2) * wz + Math.cos(ang2) * wy;
+                weaponMesh.position.set(wx,py,pz);
+                weaponMesh.rotation.x = -ang2;*/
+            };
+
+            if(c_player.isFiring && current_game_time > c_player.lastFiringTime + 100){
+                mPlayAudioBuffer(mArrayAudio[1])
+                c_player.lastFiringTime = new Date().getTime();
+
+                camera.getWorldDirection(camera_dir)
+                //console.log("camera dir:", camera_dir)
+
+                node_vertices = [];
+                if(camera.zoom > 1){
+                    let wp = muzzlePos.getWorldPosition(new THREE.Vector3());
+                    node_vertices.push(wp.x, 
+                        wp.y, 
+                        wp.z);
+                }else{
+                    node_vertices.push(playerMesh.position.x, 
+                        playerMesh.position.y + mCameraOffset.dy * (0.95 -  0.65*(c_player.isCrouch || c_player.isSliding) ), 
+                        playerMesh.position.z);
+                }
+                
+
+                /*let cp = camera.position;
+                let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, { x: camera_dir.x, y: camera_dir.y, z: camera_dir.z });
+                let maxToi = grid_size*grid_num*2;
+                let solid = false;
+                let hit = world.castRay(ray, maxToi, solid);*/
+                let {hit, ray} = mCameraRayHit(camera);
+
+                let hitPoint;
+                if (hit != null) {
+                    hitPoint = ray.pointAt(hit.timeOfImpact); // Same as: `ray.origin + ray.dir * toi`
+                    //console.log("Collider", hit.collider, "hit at point", hitPoint);
+                    //console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                    if(hit.timeOfImpact >= mCameraOffset.dz){
+                        const hitMesh = new THREE.Mesh(new THREE.SphereGeometry(playerRadius*0.1), new THREE.MeshBasicMaterial({color: 'orange'}))
+                        hitMesh.position.set(hitPoint.x, hitPoint.y, hitPoint.z);
+                        ArrayHitMesh.push(hitMesh);
+                        scene.add(hitMesh)
+                        if(ArrayHitMesh.length>100){
+                            let delMesh = ArrayHitMesh[0];
+                            scene.remove(delMesh);
+                            ArrayHitMesh.shift();
+                        }
+                        mPlayAudioBuffer(mArrayAudio[0]);
+                    }//
+
+                    node_vertices.push(hitPoint.x, hitPoint.y, hitPoint.z);
+                    mBuildDamage(hit);
+                    
+                }else{
+                    let p0 = camera.position;
+                    let d = camera_dir; 
+                    let L = grid_size * grid_num;
+                    //console.log("L:", L);
+                    node_vertices.push(p0.x + d.x * L, p0.y + d.y * L, p0.z + d.z * L);
+                }
+                
+                mCreateFiringMesh(node_vertices)
+                weaponMesh.position.z = mWeaponOffset.dz *1.02;
+                //console.log("weaponMesh:", weaponMesh)
+                //console.log("weaponMesh:", weaponMesh.getWorldPosition(new THREE.Vector3()))
+            }
+
+            if( current_game_time > c_player.lastFiringTime + 50){
+                if(c_player.firingMesh!=null){
+                    scene.remove(c_player.firingMesh);
+                    c_player.firingMesh = null;
+                }
+                weaponMesh.position.z = mWeaponOffset.dz;
+            }
+
+            mSetCameraPosition(camera, mCameraOffset, c_player); //playerMesh
+            light.position.set(light_pos0.x + playerNewPosition.x, 
+                               light_pos0.y + playerNewPosition.y, 
+                               light_pos0.z + playerNewPosition.z);
  
         }
         renderer.render(scene, camera);
         requestAnimationFrame(tick);
 
         stats.end();
+    }
+
+    function mCameraRayHit(camera_){
+        let dir = new THREE.Vector3();
+        camera_.getWorldDirection(dir)
+        let cp = camera_.position;
+        let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, { x: dir.x, y: dir.y, z: dir.z });
+        let maxToi = grid_size*grid_num*2;
+        let solid = false;
+        let hit = world.castRay(ray, maxToi, solid);
+        return {hit: hit, ray: ray};
+    }
+
+    function mCreateFiringMesh(vertices){
+        line_geo.setPositions( vertices );
+        line_geo.setColors( colors );
+        //let line = new THREE.LineSegments2( line_geo, matLine );
+        //line.computeLineDistances();
+        //scene.add( line );
+        c_player.firingMesh = new THREE.LineSegments2( line_geo, matLine );
+        c_player.firingMesh.computeLineDistances();
+        scene.add( c_player.firingMesh );
+    }
+
+    function mBuildDamage(hit){
+        //console.log("Collider:", hit.collider)
+        //let b = ArrayBuild[hit.collider.handle];
+        let b = ArrayBuild[hit.collider.build_id];
+        //console.log("b:%o", b);
+        if(b!=null){
+            //console.log("ArrayBuild:%o", ArrayBuild);
+            b.health -= 30;
+            b.buildMesh.material.opacity = b.health / b.maxHealth * 0.5 + 0.5;
+            //console.log("b.buildMesh.material.opacity:%o", b.buildMesh.material.opacity);
+            if(b.health<=0){
+                //b.buildMesh.material.opacity = 1;
+                mDestroyBuild(b);
+            }
+        }
+    }
+
+    function mDestroyBuild(b){
+        if(b!=null){
+            scene.remove(b.buildMesh);
+            b.buildMesh = null;
+            world.removeCollider(b.collider);
+            mPlayAudioBuffer(mArrayAudio[2], 2.0);
+        }
     }
     
 
@@ -1029,6 +1472,8 @@ function init() {
 
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(width, height);
+
+        renderer.getSize(resolution);
 
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
@@ -1102,7 +1547,7 @@ function init() {
             "P: pointer lock,  WASD: move,  Space: jump,  Shift: crouch,  Shift(long): slide",
             W_/2, fontSize);
         context2d.fillText(
-            "Mouse move: player's view direction",
+            "Mouse move: player's view direction, Left click: shoot, Right click: ADS",
             W_/2, fontSize*2);         
         //context2d.fillStyle = "blue"
         //context2d.fillRect(100, 100, 1000, 1000);
