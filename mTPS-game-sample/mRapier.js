@@ -17,6 +17,21 @@ init();
 //window.addEventListener('DOMContentLoaded', init);
 function init() {
 
+    window.onkeydown = function(e) {
+        if (e.keyCode == 9)
+          return false; // Disable Tab!
+     
+        if( (e.keyCode == 32) ) 
+          return false; // Disable Space!
+    
+        // if (e.key == "Escape")
+        //   return false;
+    }
+
+    const textureLoader = new THREE.TextureLoader();
+    const buildTexture = textureLoader.load('/mTPS-game-sample/image/ch01_woodplank_long_dif.png');
+    const buildTempTexture = textureLoader.load('/mTPS-game-sample/image/build_temp.png');
+
     let mArrayAudio = [];
 
     function loadAudio(url) {
@@ -40,11 +55,14 @@ function init() {
             loadAudio('/mTPS-game-sample/sound/bullet-hit-001.mp3'),
             loadAudio('/mTPS-game-sample/sound/handgun.mp3'),
             loadAudio('/mTPS-game-sample/sound/build-destory.mp3'),
+            loadAudio('/mTPS-game-sample/sound/sliding.mp3'),
+            loadAudio('/mTPS-game-sample/sound/build01.mp3'),
         ];
         Promise.all(promises).then(audioBuffers => {
             
             for(var i=0;i<audioBuffers.length;i++){
                 mArrayAudio[i] = audioBuffers[i];
+                console.log(audioBuffers[i])
             }
             console.log("sound loaded")
         });    
@@ -55,7 +73,7 @@ function init() {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioContext = new AudioContext();
 
-    function mPlayAudioBuffer(audioBuffer, volume = 1.0) {
+    function mPlayAudioBuffer(audioBuffer, volume = 1.0, loop = false) {
         const audioSource = audioContext.createBufferSource();
         audioSource.buffer = audioBuffer;
         //console.log("volume:"+volume);
@@ -64,6 +82,7 @@ function init() {
         gainNode.gain.value = volume;
         gainNode.connect(audioContext.destination);
         audioSource.connect(gainNode);
+        audioSource.loop = loop;
         audioSource.start();
     }
 
@@ -74,7 +93,7 @@ function init() {
     const canvas2d = document.querySelector( '#canvas-2d' );
 
     
-    let g_scale = 20.0
+    let g_scale = 20.0; //20.0
     const gravity = new RAPIER.Vector3(0.0, -9.81*g_scale, 0.0)
     const world = new RAPIER.World(gravity)
     
@@ -107,13 +126,15 @@ function init() {
     let mScale = 1;
     let grid_size = mScale*5;
     let gridH_size = mScale*4;
-    let buildThick = mScale*0.1;
+    let buildThick = grid_size*0.04;
+    let slope_ang = Math.acos(grid_size / Math.sqrt(grid_size*grid_size+gridH_size*gridH_size) )
     let grid_num = 10;
+    let tol = 1E-5;
 
  
     let camera = new THREE.PerspectiveCamera(80, width / height, mScale*0.01, mScale * 100);
     let mCameraOffset = new Object();
-    mCameraOffset.dx = mScale*0.5;
+    mCameraOffset.dx = mScale*0.5//  0.5;
     mCameraOffset.dy = mScale*0.6; //1.4
     mCameraOffset.dz = mScale*1.6; //1000*1.6;
     
@@ -130,39 +151,58 @@ function init() {
         if(c_player.isCrouch || c_player.isSliding){
             dy *= 0.5
         }
-        //camera.position.set(p.x + dx, p.y + dy, p.z + dz);
-        //camera.lookAt(new THREE.Vector3(p.x + dx, p.y + dy, p.z));
-
-        if(player){    
-            let a1 = player.angle;
-            let a2 = -player.angle2;
-            camera.position.set(
-                p.x + ( Math.sin(a1) * Math.cos(a2) * dz + Math.cos(a1) * dx ), 
-                p.y + dy + dz * Math.sin(a2), 
-                p.z + ( Math.cos(a1) * Math.cos(a2) * dz - Math.sin(a1) * dx )
-            );
-            
-            camera.rotation.order = "YXZ";
-            camera.rotation.y =  a1;// - Math.PI/2;
-            camera.rotation.x = -a2;
-
-            /*if(player.weaponMesh){
-                let dx = mWeaponOffset.dx; // 1000*0.1;
-                let dy = mWeaponOffset.dy; //1000*1.4;
-                let dz = mWeaponOffset.dz; 
-                let ddy = 0.1;
-                player.weaponMesh.position.set(
-                    dx, 
-                    dy *(1-ddy) + dz * Math.sin(-a2) + dy*ddy*Math.cos(-a2), 
-                    Math.cos(-a2) * dz + dy*ddy*Math.sin(-a2)
-                );
-                player.weaponMesh.rotation.x = a2;
-
-            }*/
+       
+        if(playerRight){
+            //let dir = new THREE.Vector3();
+            //playerRight.getWorldDirection(dir)
+            //console.log("dir:", dir);
+            let {hit, ray} = mPlayerRayHit(playerRight);
+            if (hit != null) {
+                //console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                if(hit.timeOfImpact < offset.dx - playerRadius){
+                    //console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                    dx = hit.timeOfImpact + playerRadius;
+                }
+            }
         }
+        playerPiv1.position.x = -dx;
+
+        if(playerPiv1){
+            let {hit, ray} = mPlayerRayHit(playerPiv1, -1);
+            if (hit != null) {
+                //console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                if(hit.timeOfImpact < offset.dz){
+                    dz = hit.timeOfImpact;
+                }
+            }
+        }
+
+        if(playerPiv2){
+            playerPiv2.position.z = -dz + 0.001;
+            let cp = playerPiv2.getWorldPosition(new THREE.Vector3());
+            //console.log("cp:", cp);
+            camera.position.set(cp.x, cp.y, cp.z);
+            camera.rotation.order = "YXZ";
+            camera.rotation.y =  player.angle + Math.PI;
+            camera.rotation.x = player.angle2;
+            //console.log("camera.rotation.y:", camera.rotation.y);
+
+            if(props.frontView){
+                playerPiv1.position.y = 0
+                playerPiv2.position.z = dz*1.0
+                let cp = playerPiv2.getWorldPosition(new THREE.Vector3());
+                //console.log("cp:", cp);
+                camera.position.set(cp.x, cp.y, cp.z);
+                camera.rotation.order = "YXZ";
+                camera.rotation.y =  player.angle;
+                camera.rotation.x = player.angle2;
+            }
+        }
+        //console.log("camera.position:", camera.position);
 
         // weapon
         playerPiv1.position.y = dy;
+        //weaponMesh.position.z = -dz;
     }
 
     //--- Light ---//
@@ -184,6 +224,7 @@ function init() {
     light.shadow.mapSize.height = 1024 * 8
     //light.shadow.camera.near = gridH_size*grid_num
     light.shadow.camera.far = gridH_size*grid_num*1.3;
+    light.shadow.bias = -0.005;  //-0.0005;
     scene.add(light);
     //const light = new THREE.SpotLight(0xffffff, 400, 100, Math.PI / 4, 1);
     //light.castShadow = true;
@@ -198,6 +239,9 @@ function init() {
     light2.position.set(grid_size*3, gridH_size* grid_num, 0);
     light2.intensity = 0.1; 
     scene.add(light2);*/
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)
+    scene.add(ambientLight);
 
 
     //--- Environment ---//
@@ -217,7 +261,9 @@ function init() {
     let playerRadius = 0.35 * mScale;
     //playerMesh.castShadow = true;
     //playerMesh.receiveShadow = true;
+    let playerRight = new THREE.Group();
     let playerPiv1 = new THREE.Group();
+    let playerPiv2 = new THREE.Group();
 
     //let model = null;
     //let mAxes = null;
@@ -271,6 +317,10 @@ function init() {
         playerMesh.add(object);
         scene.add( playerMesh );
 
+        playerRight.position.set(-playerRadius-tol, 0, 0);
+        playerRight.rotation.y = -Math.PI/2;
+        playerMesh.add(playerRight);
+        
         playerPiv1.position.set(-mCameraOffset.dx, mCameraOffset.dy, 0);
         playerMesh.add(playerPiv1);
         
@@ -278,15 +328,20 @@ function init() {
         let ax = new THREE.AxesHelper(size);
         ax.visible = false;
         playerPiv1.add(ax);
+
+        playerPiv2.position.set(0, 0, -mCameraOffset.dz);
+        playerPiv1.add(playerPiv2);
         
-        mSetCameraPosition(camera, mCameraOffset, c_player); //playerMesh
+        //mSetCameraPosition(camera, mCameraOffset, c_player); //playerMesh
     } );
 
     let weaponMesh = new THREE.Group();
     let mWeaponOffset = new Object();
     mWeaponOffset.dx = -mCameraOffset.dx; //mScale*-0.2;
-    mWeaponOffset.dy = mCameraOffset.dy *0.73; //mScale*0.5; //1.4
-    mWeaponOffset.dz = -mCameraOffset.dz*0.9; //mScale*0.5; //1000*1.6;
+    //mWeaponOffset.dy = mCameraOffset.dy *0.73; //mScale*0.5; //1.4
+    //mWeaponOffset.dz = -mCameraOffset.dz*0.9; //*0.9; 
+    mWeaponOffset.dy = -0.161;
+    mWeaponOffset.dz = mCameraOffset.dz*0.1; //*0.9; 
     let muzzlePos = new THREE.Object3D();
 
     loader.load( 'model/Scar_L01.fbx', function ( object ) {
@@ -308,12 +363,17 @@ function init() {
         /*weaponMesh.position.set(mWeaponOffset.dx, mWeaponOffset.dy, mWeaponOffset.dz);
         playerMesh.add(weaponMesh);*/
 
-        weaponMesh.position.set(0, -0.16, mWeaponOffset.dz);
+        /*weaponMesh.position.set(0, -0.161, mWeaponOffset.dz);
         playerPiv1.add(weaponMesh);
+        muzzlePos.position.set(0, -0.161, mWeaponOffset.dz*0.6);
+        playerPiv1.add(muzzlePos);*/
 
-        muzzlePos.position.set(0, -0.16, mWeaponOffset.dz*0.6);
-        playerPiv1.add(muzzlePos);
-        
+        weaponMesh.position.set(0, mWeaponOffset.dy, mWeaponOffset.dz);
+        playerPiv2.add(weaponMesh);
+
+        muzzlePos.position.set(0, mWeaponOffset.dy, mCameraOffset.dz*0.4);
+        playerPiv2.add(muzzlePos);
+
     } );
 
     /*const loaderW = new THREE.GLTFLoader();
@@ -343,13 +403,13 @@ function init() {
     scene.add(gAxes);
     
     //--- Grid ---//
-    const grid = new THREE.GridHelper( grid_size*grid_num*2, grid_num*2, 0x000000, 0x000000 );
+    const grid = new THREE.GridHelper( grid_size*grid_num*2, grid_num*2, "white", "white" );
     grid.material.opacity = 0.5;
     grid.material.transparent = true;
     scene.add( grid );
 
     //--- ground
-    const mesh = new THREE.Mesh( new THREE.PlaneGeometry( grid_size*grid_num*2, grid_size*grid_num*2 ), new THREE.MeshPhongMaterial( { color: '#333' } ) );//, depthWrite: false
+    const mesh = new THREE.Mesh( new THREE.PlaneGeometry( grid_size*grid_num*2, grid_size*grid_num*2 ), new THREE.MeshPhongMaterial( { color: '#101090' } ) );//, depthWrite: false #'#010190'
     mesh.rotation.x = - Math.PI / 2;
     mesh.receiveShadow = true;
     scene.add( mesh );
@@ -391,7 +451,7 @@ function init() {
     ArrayMesh.push(cubeMesh2);
     ArrayBody.push(cubeBody2);
 
-    let ArrayBuild = [];
+    let ArrayBuild = {}; //[]; // should use object?
     let build_id = 0;
 
     function mCreateWall(px, py, pz, type="z"){
@@ -403,13 +463,15 @@ function init() {
             Lx = buildThick;
         }
     
-        let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        //let mat = new THREE.MeshLambertMaterial({color: 0x6699FF, side: THREE.DoubleSide});
+        let mat = new THREE.MeshLambertMaterial({map: buildTexture, side: THREE.DoubleSide});
         mat.transparent = true;
         mat.opacity = 1.0;
     
         const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), mat)
         wallMesh.castShadow = true;
         wallMesh.receiveShadow = true;
+        wallMesh.buildType = 0;
         scene.add(wallMesh)
             const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz))
             const wallShape = RAPIER.ColliderDesc.cuboid(Lx/2, Ly/2, Lz/2).setMass(1).setRestitution(0.0).setFriction(0.0)
@@ -454,26 +516,37 @@ function init() {
         let Lx = grid_size
         let Ly = buildThick
         let Lz = L
+        if( type==="x+" || type==="x-" ){
+            Lz = grid_size
+            Lx = L
+        }
+        //console.log("L:"+Lx+", "+Ly+", "+Lz)
 
-        let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        //let mat = new THREE.MeshLambertMaterial({color: 0x6699FF, side: THREE.DoubleSide});
+        let mat = new THREE.MeshLambertMaterial({map: buildTexture, side: THREE.DoubleSide});
         mat.transparent = true;
         mat.opacity = 1.0;
 
         const slopeMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), mat)
         slopeMesh.castShadow = true
         slopeMesh.receiveShadow = true;
+        slopeMesh.buildType = 2;
         scene.add(slopeMesh)
             let a = Math.acos(grid_size/L)
-            if(type==="z+"){
+            if(type==="z+" || type==="x-"){
                 a = -a;
             }
             let w = Math.cos(a/2)
             let x = 1.0*Math.sin(a/2)
             let y = 0.0
             let z = 0.0
+            if(type==="x+" || type==="x-"){
+                z = 1.0*Math.sin(a/2)
+                x = 0.0
+            }
             
             const slopeBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz).setRotation({ w: w, x: x, y: y, z: z }))
-            const slopeShape = RAPIER.ColliderDesc.cuboid(grid_size/2, buildThick/2, L/2).setMass(1).setRestitution(0.0).setFriction(0.0)
+            const slopeShape = RAPIER.ColliderDesc.cuboid(Lx/2, Ly/2, Lz/2).setMass(1).setRestitution(0.0).setFriction(0.0)
             const slopeCollider = world.createCollider(slopeShape, slopeBody)
             slopeCollider.build_id = build_id;
         ArrayMesh.push(slopeMesh);
@@ -491,14 +564,31 @@ function init() {
     mCreateSlope(-grid_size*4+grid_size/2, gridH_size*1+gridH_size/2, -grid_size*3+grid_size/2)
     mCreateSlope(-grid_size*4+grid_size/2, gridH_size*2+gridH_size/2, -grid_size*4+grid_size/2)
 
+    mCreateSlope(-grid_size*4+grid_size/2, gridH_size*0+gridH_size/2, grid_size*3+grid_size/2, "x+")
+    mCreateFloor(-grid_size*3+grid_size/2, gridH_size*1, grid_size*3+grid_size/2)
+    mCreateFloor(-grid_size*3+grid_size/2, gridH_size*1, grid_size*4+grid_size/2)
+    mCreateSlope(-grid_size*4+grid_size/2, gridH_size*1+gridH_size/2, grid_size*4+grid_size/2, "x-")
+    mCreateFloor(-grid_size*5+grid_size/2, gridH_size*2, grid_size*3+grid_size/2)
+    mCreateFloor(-grid_size*5+grid_size/2, gridH_size*2, grid_size*4+grid_size/2)
+    
+    mCreateSlope(-grid_size*4+grid_size/2, gridH_size*2+gridH_size/2, grid_size*3+grid_size/2, "x+")
+    mCreateFloor(-grid_size*3+grid_size/2, gridH_size*3, grid_size*3+grid_size/2)
+    mCreateFloor(-grid_size*3+grid_size/2, gridH_size*3, grid_size*4+grid_size/2)
+    mCreateSlope(-grid_size*4+grid_size/2, gridH_size*3+gridH_size/2, grid_size*4+grid_size/2, "x-")
+    mCreateFloor(-grid_size*5+grid_size/2, gridH_size*4, grid_size*3+grid_size/2)
+    mCreateFloor(-grid_size*5+grid_size/2, gridH_size*4, grid_size*4+grid_size/2)
+
+
     function mCreateFloor(px, py, pz){    
-        let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        //let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        let mat = new THREE.MeshLambertMaterial({map: buildTexture, side: THREE.DoubleSide});
         mat.transparent = true;
         mat.opacity = 1.0;
 
         const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(grid_size, buildThick, grid_size), mat)
         floorMesh.castShadow = true
         floorMesh.receiveShadow = true;
+        floorMesh.buildType = 1;
         scene.add(floorMesh)
             const floorBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz))
             const floorShape = RAPIER.ColliderDesc.cuboid(grid_size/2, buildThick/2, grid_size/2).setMass(1).setRestitution(0.0).setFriction(0.0)
@@ -513,6 +603,114 @@ function init() {
 
     mCreateFloor(-grid_size*4+grid_size/2, gridH_size*3, -grid_size*5+grid_size/2)
     mCreateFloor(-grid_size*3+grid_size/2, gridH_size, -grid_size*3+grid_size/2)
+
+    function mCreateConeGeometry(){
+        const geometry = new THREE.BufferGeometry();
+        /*let vertices = new Float32Array(5*3);
+        let uvs = new Float32Array(5*2);
+        let indices = new Uint32Array(4*3);
+        let cone_coord = [ 0, 0, 0,
+                          -grid_size/2, -gridH_size/2, -grid_size/2,
+                          -grid_size/2, -gridH_size/2,  grid_size/2,
+                           grid_size/2, -gridH_size/2,  grid_size/2,
+                           grid_size/2, -gridH_size/2, -grid_size/2];
+        let uv_coord = [0.5, 1.0,
+                        0.0, 0.0,
+                        1.0, 0.0,
+                        0.0, 0.0,
+                        1.0, 0.0 ];*/
+        let vertices = new Float32Array(12*3);
+        let uvs = new Float32Array(12*2);
+        let indices = new Uint32Array(4*3);
+        let cone_coord = [ 
+        -grid_size/2, -gridH_size/2, -grid_size/2,
+        -grid_size/2, -gridH_size/2,  grid_size/2,
+        0, 0, 0,
+        -grid_size/2, -gridH_size/2,  grid_size/2,
+         grid_size/2, -gridH_size/2,  grid_size/2,
+        0, 0, 0,
+         grid_size/2, -gridH_size/2,  grid_size/2,
+         grid_size/2, -gridH_size/2, -grid_size/2,
+        0, 0, 0,
+         grid_size/2, -gridH_size/2, -grid_size/2,
+        -grid_size/2, -gridH_size/2, -grid_size/2,
+        0, 0, 0,];
+        let uv_coord = [
+        0.0, 0.0,
+        1.0, 0.0,
+        0.5, 1.0,
+        0.0, 0.0,
+        1.0, 0.0,
+        0.5, 1.0,
+        0.0, 0.0,
+        1.0, 0.0,
+        0.5, 1.0,
+        0.0, 0.0,
+        1.0, 0.0,
+        0.5, 1.0 ];
+        for(var i=0; i<cone_coord.length; i++){
+            vertices[i] = cone_coord[i];
+        }
+        for(var i=0; i<uvs.length; i++){
+            uvs[i] = uv_coord[i];
+        }
+        for(var i=0; i<indices.length; i++){
+            indices[i] = i;
+        }
+
+        /*indices[3*0+0] = 1;
+        indices[3*0+1] = 2;
+        indices[3*0+2] = 0;
+        indices[3*1+0] = 2;
+        indices[3*1+1] = 3;
+        indices[3*1+2] = 0;
+        indices[3*2+0] = 3;
+        indices[3*2+1] = 4;
+        indices[3*2+2] = 0;
+        indices[3*3+0] = 4;
+        indices[3*3+1] = 1;
+        indices[3*3+2] = 0;*/
+
+        geometry.setAttribute( 'position', new THREE.BufferAttribute( vertices, 3 ) );
+        geometry.setAttribute( 'uv',    new THREE.BufferAttribute( uvs,  2));
+        geometry.setAttribute( 'index',    new THREE.BufferAttribute( indices,  1));
+        geometry.computeVertexNormals();
+
+        return geometry;
+    }
+
+    function mCreateCone(px, py, pz){    
+        //let mat = new THREE.MeshLambertMaterial({color: 0x6699FF});
+        let mat = new THREE.MeshLambertMaterial({map: buildTexture, side: THREE.DoubleSide});
+        mat.transparent = true;
+        mat.opacity = 1.0;
+
+        let geometry = mCreateConeGeometry();
+        //console.log("geometry:", geometry.attributes);
+        let vertices = geometry.attributes.position.array;
+        let indices = geometry.attributes.index.array;
+        
+        let coneMesh = new THREE.Mesh( geometry, mat );
+        coneMesh.castShadow = true
+        coneMesh.receiveShadow = true;
+        coneMesh.buildType = 1;
+        scene.add(coneMesh)
+            const coneBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(px, py, pz))
+            const coneShape = RAPIER.ColliderDesc.trimesh(vertices, indices).setMass(1).setRestitution(0.0).setFriction(0.0)
+            const coneCollider = world.createCollider(coneShape, coneBody)
+            coneCollider.build_id = build_id;
+        ArrayMesh.push(coneMesh);
+        ArrayBody.push(coneBody);
+
+        mAddBuild(coneCollider, coneMesh, coneBody)
+        build_id += 1; 
+    }
+
+    mCreateCone(grid_size*1+grid_size/2, gridH_size/2, grid_size/2);
+    mCreateCone(grid_size*2+grid_size/2, gridH_size/2, grid_size/2);
+    mCreateCone(grid_size*3+grid_size/2, gridH_size/2, grid_size/2);
+    mCreateCone(grid_size*4+grid_size/2, gridH_size/2, grid_size/2);
+    mCreateCone(grid_size*5+grid_size/2, gridH_size/2, grid_size/2);
 
 
     //--- Player
@@ -539,7 +737,7 @@ function init() {
         console.log("playerCollider.handle:", playerCollider)
 
         //const playerSquatBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, playerRadius*5, 0).lockRotations())
-        const playerSquatShape = RAPIER.ColliderDesc.capsule(playerRadius*0.75, playerRadius).setMass(1.0).setTranslation(0.0, -playerRadius*0.75, 0.0).setRestitution(0.0).setFriction(0.0)
+        const playerSquatShape = RAPIER.ColliderDesc.capsule(playerRadius*0.75, playerRadius).setMass(1.0).setTranslation(0.0, -playerRadius*0.75, 0.0).setRestitution(0.0).setFriction(2.0)
         playerSquatShape.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
         let playerSquatCollider = world.createCollider(playerSquatShape, playerBody);
         playerSquatCollider.setEnabled(false);
@@ -585,9 +783,9 @@ function init() {
         //console.log("key:"+ event.key)
         
         if(event.key === 'p'  && event.type === 'keydown'){
-            if(mPointLock==0){
+            if(document.pointerLockElement==null){ //(!mPointLock){
                 //ElementRequestPointerLock(canvas2d);
-                mEnablePointerLock();
+                mEnablePointerLock(canvas2d);
             }
             else{
                 DocumentExitPointerLock(document);
@@ -636,8 +834,9 @@ function init() {
         if(event.key === 'Shift'  && event.type === 'keydown'){
             if(c_player.slidingPressedTime < 0){
                 c_player.slidingPressedTime = new Date().getTime();
+                c_player.isSliding = false;
             }
-            c_player.isSliding = false;
+            //c_player.isSliding = false;
             //console.log('c_player.slidingPressedTime:'+c_player.slidingPressedTime);
         }
         if(event.key === 'Shift'  && event.type === 'keyup'){
@@ -669,13 +868,16 @@ function init() {
             
         }
     
-        if(event.key === 'f'  && event.type === 'keydown'){
+        if(event.key.toUpperCase() === 'F'  && event.type === 'keydown'){
             if(c_player){
+                c_player.mode = 1;
                 c_player.weapon = 0;
-                //weaponMesh.visible = false;
+                //weaponMesh.visible = true;
+                c_player.buildTemp.visible = false;
                 console.log('c_player.weapon:', c_player.weapon);
             }
         }
+       
         /*if(event.key === '1'  && event.type === 'keydown'){
             if(c_player){
                 c_player.weapon = 1;
@@ -683,7 +885,23 @@ function init() {
                 console.log('c_player.weapon:', c_player.weapon);
             }
         }*/
-        
+
+        if(event.key.toUpperCase() === 'Q'  && event.type === 'keydown'){
+            mBuildModeWall()
+        }
+
+        if(event.key.toUpperCase() === 'Z'  && event.type === 'keydown'){
+            mBuildModeFloor()
+        }
+
+        if(event.key.toUpperCase() === 'C'  && event.type === 'keydown'){
+            mBuildModeSlope()
+        }
+
+        if(event.key.toUpperCase() === 'TAB'  && event.type === 'keydown'){
+            mBuildModeCone()
+        }
+
         if(keyEnabledArray[event.keyCode] && event.type === 'keydown') {
             keyEnabledArray[event.keyCode] = false;
             //console.log('keydown:'+event.keyCode+","+keyEnabledArray[event.keyCode])
@@ -703,15 +921,57 @@ function init() {
         playerBodyStandMesh.visible = !isCrouch
         playerBodySquatMesh.visible = isCrouch
     }
+
+    function mBuildModeWall(){
+        if(c_player){
+            c_player.mode = 2;
+            c_player.buildType = 0;
+            c_player.weapon = 0;
+            weaponMesh.visible = false;
+            //console.log('c_player.weapon:', c_player.weapon);
+        }
+    }
+
+    function mBuildModeFloor(){
+        if(c_player){
+            c_player.mode = 2;
+            c_player.buildType = 1;
+            c_player.weapon = 0;
+            weaponMesh.visible = false;
+            //console.log('c_player.weapon:', c_player.weapon);
+        }
+    }
+
+    function mBuildModeSlope(){
+        if(c_player){
+            c_player.mode = 2;
+            c_player.buildType = 2;
+            c_player.weapon = 0;
+            weaponMesh.visible = false;
+            //console.log('c_player.weapon:', c_player.weapon);
+        }
+    }
     
+    function mBuildModeCone(){
+        if(c_player){
+            c_player.mode = 2;
+            c_player.buildType = 3;
+            c_player.weapon = 0;
+            weaponMesh.visible = false;
+            //console.log('c_player.weapon:', c_player.weapon);
+        }
+    }
+
     //--- Mouse event ---//
-    var mMouseSenseX = 0.00065*3; //0.00065 at 10%
-    var mMouseSenseY = 0.00065*3; //
+    var mMouseSenseX = 0.00065*2; //0.00065 at 10%
+    var mMouseSenseY = 0.00065*2; //
     let c_player = new Object();
-    c_player.angle_offset_init = Math.PI;
+    c_player.model = null;
+    c_player.angle_offset_init = 0; //Math.PI;
     c_player.angle_offset = c_player.angle_offset_init;
     c_player.angle = 0; //Math.PI;
     c_player.angle2 = 0;
+    c_player.height = playerRadius * 5;
     c_player.isGrounded = false;
     c_player.isOnSlope = false;
     c_player.isJump = false;
@@ -722,7 +982,81 @@ function init() {
     c_player.isFiring = false;
     c_player.lastFiringTime = -1;
     c_player.firingMesh = null;
-    c_player.model = null;
+    c_player.mode = 1; // 1:shoot, 2:build, 3:edit
+    c_player.buildType = 0;
+    c_player.buildTemp = null;
+    c_player.zWallTemp = null;
+    c_player.xWallTemp = null;
+    c_player.FloorTemp = null;
+    c_player.zSlopeTemp = null;
+    c_player.xSlopeTemp = null;
+    c_player.ConeTemp = null;
+
+    //let buildTempMaterial = new THREE.MeshBasicMaterial({color: "white", side: THREE.DoubleSide});
+    let buildTempMaterial = new THREE.MeshBasicMaterial({map: buildTempTexture, side: THREE.DoubleSide});
+    buildTempMaterial.transparent = true;
+    buildTempMaterial.opacity = 0.7;
+
+    function mInitBuildTemp(player){
+        let Lx = grid_size
+        let Ly = gridH_size
+        let Lz = buildThick
+        const zWallMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), buildTempMaterial)
+        zWallMesh.position.set(Lx/2, Ly/2, Lz/2);
+        zWallMesh.visible = false;
+        player.zWallTemp = zWallMesh;
+        scene.add(player.zWallTemp);
+
+        Lz = grid_size
+        Lx = buildThick
+        const xWallMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), buildTempMaterial)
+        xWallMesh.position.set(Lx/2, Ly/2, Lz/2);
+        xWallMesh.visible = false;
+        player.xWallTemp = xWallMesh;
+        scene.add(player.xWallTemp);
+
+        Lz = grid_size
+        Lx = grid_size
+        Ly = buildThick
+        const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), buildTempMaterial)
+        floorMesh.position.set(Lx/2, Ly/2, Lz/2);
+        floorMesh.visible = false;
+        player.FloorTemp = floorMesh;
+        scene.add(player.FloorTemp);
+
+        let L = Math.sqrt(grid_size*grid_size+gridH_size*gridH_size)
+        let a = Math.acos(grid_size/L)
+        Lx = grid_size
+        Ly = buildThick
+        Lz = L
+        const zSlopeMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), buildTempMaterial)
+        zSlopeMesh.position.set(Lx/2, gridH_size/2, Lz/2);
+        zSlopeMesh.rotation.x = -a;
+        zSlopeMesh.visible = false;
+        player.zSlopeTemp = zSlopeMesh;
+        scene.add(player.zSlopeTemp);
+        
+        Lz = grid_size
+        Ly = buildThick
+        Lx = L
+        const xSlopeMesh = new THREE.Mesh(new THREE.BoxGeometry(Lx, Ly, Lz), buildTempMaterial)
+        xSlopeMesh.position.set(Lx/2, gridH_size/2, Lz/2);
+        xSlopeMesh.rotation.z = a;
+        xSlopeMesh.visible = false;
+        player.xSlopeTemp = xSlopeMesh;
+        scene.add(player.xSlopeTemp);
+
+        let geometry = mCreateConeGeometry();
+        const coneMesh = new THREE.Mesh( geometry, buildTempMaterial );
+        coneMesh.position.set(grid_size/2, gridH_size/2, grid_size/2);
+        coneMesh.visible = false;
+        player.ConeTemp = coneMesh;
+        scene.add(player.ConeTemp);
+
+    }
+
+    mInitBuildTemp(c_player);
+
 
 
     canvas2d.addEventListener('mousemove', function(e)
@@ -744,12 +1078,21 @@ function init() {
             //console.log("ang_:"+ang_);
             c_player.angle -= ang_;
             c_player.angle2 -= ang2_;
+            if(c_player.angle >= Math.PI*2.0){
+                c_player.angle -= Math.PI*2.0;
+            }
+            if(c_player.angle < 0){
+                c_player.angle += Math.PI*2.0;
+            }
             c_player.angle2 = Math.max(-Math.PI/2, c_player.angle2);
             c_player.angle2 = Math.min( Math.PI/2, c_player.angle2);
             //console.log("c_player.angle:"+c_player.angle/Math.PI*180);
             //console.log("c_player.angle2:"+c_player.angle2/Math.PI*180);
             //c_player.weaponMesh.rotation.x = -c_player.angle2;
             playerPiv1.rotation.x = -c_player.angle2;
+            if(props.frontView){
+                playerPiv1.rotation.x = c_player.angle2;
+            }
         }
         
     });
@@ -757,10 +1100,13 @@ function init() {
     canvas2d.addEventListener('mousedown', function(e)
     {
         //console.log('mousedown')
+        if(document.pointerLockElement==null){
+            mEnablePointerLock(canvas2d)
+        }
 
         if(c_player){
 
-            //if(c_player.mode==1){ //(mMode==1){
+            if(c_player.mode==1){ //(mMode==1){
                 if(e.button==0){
                     if((c_player.weapon!=5) ){ // (c_player.weapon<=3)   //(c_player.weapon<=4)||(c_player.weapon==6)
                         //movement['shoot'] = true;
@@ -776,9 +1122,13 @@ function init() {
                     camera.updateProjectionMatrix();
                     c_player.model.visible = false;
                     c_player.weaponMesh.visible = true;
-                }  
-                
-            //}//
+                }                
+            }
+            
+            if(e.button==0){ 
+                //mDoBuild(c_player.buildTemp)
+                c_player.nowTouboBuild = true;
+            }
            
             if( (e.button==2) ){
                 //ws.send('scope '+ 1)
@@ -799,7 +1149,7 @@ function init() {
                 c_player.isFiring = false;
                 //c_player.lastFiringTime = new Date().getTime();
                 //console.log("c_player.isFiring:"+c_player.isFiring);
-                
+                c_player.nowTouboBuild = false;
             }//
 
             if(e.button==2){
@@ -813,6 +1163,17 @@ function init() {
         }//
     });
 
+    canvas2d.addEventListener('mousewheel', function(e)
+    {
+        var v_ = e.wheelDelta;
+        if(v_<0){ // down(win)    up(mac)
+            //console.log('wheel down:');  
+            mBuildModeFloor()
+        }else if(v_>0){ //up(win)  down(mac)
+            mBuildModeSlope()
+        }
+        //console.log('wheel:'+v_);  
+    });
 
 
     const gui = new GUI();
@@ -823,6 +1184,7 @@ function init() {
         rayCast: false,
         hitSound: false,
         //pointerLock: false,
+        frontView: false,
     };
     //gui.add( props, 'showAxes').name('Show axes')
     gui.add( props, 'showCollision').name('Show collision').onChange( value => {
@@ -842,6 +1204,9 @@ function init() {
         
         })
     gui.add( props, 'hitSound').name('Hit sound').onChange( value => {
+        
+        })
+    gui.add( props, 'frontView').name('Front View').onChange( value => {
         
         })
 
@@ -1010,10 +1375,16 @@ function init() {
                 arrayAction[10].stop();
             }   
     
+            //console.log('c_player.isSliding:'+c_player.isSliding);
             if( current_game_time > c_player.slidingPressedTime + 300 && c_player.slidingPressedTime > 0 ){
+                if( !c_player.isSliding ){
+                    console.log('sliding play');
+                    mPlayAudioBuffer(mArrayAudio[3], 1, false);
+                }
                 c_player.isSliding = true;
                 //c_player.slidingPressedTime = -1;
             }
+
     
             if(c_player.isSliding){
                 //console.log('c_player.isSliding:'+c_player.isSliding);
@@ -1103,7 +1474,7 @@ function init() {
                     //if(handle1==playerCollider.handle || handle2==playerCollider.handle){
                     if(handle1==h || handle2==h){
                         //console.log("contact:%o", event.totalForce())
-                        if(event.totalForce().y > 1 && time_now > lastJumpTime + 100  ){ // 
+                        if( Math.abs(event.totalForce().y) > 1 && time_now > lastJumpTime + 100  ){ // 
                             //lastGroundedTime = performance.now();
                             lastGroundedTime = time_now;
                             c_player.isGrounded = true;
@@ -1229,25 +1600,45 @@ function init() {
             let input_sx = 0;
             let input_sz = 0;
             if(movement.forward){
-                input_sz += -spd * Math.cos(a1);
-                input_sx += -spd * Math.sin(a1);
-            }
-            if(movement.back){
                 input_sz += spd * Math.cos(a1);
                 input_sx += spd * Math.sin(a1);
             }
-            if(movement.left){
-                input_sx += -spd * Math.cos(a1);
-                input_sz +=  spd * Math.sin(a1);
+            if(movement.back){
+                input_sz += -spd * Math.cos(a1);
+                input_sx += -spd * Math.sin(a1);
             }
-            if(movement.right){
+            if(movement.left){
                 input_sx +=  spd * Math.cos(a1);
                 input_sz += -spd * Math.sin(a1);
+            }
+            if(movement.right){
+                input_sx += -spd * Math.cos(a1);
+                input_sz +=  spd * Math.sin(a1);
             }
 
             if(c_player.isGrounded){
                 //console.log('input');
                 playerBody.setLinvel({ x: input_sx, y: s.y, z: input_sz}, true);
+
+                let ctr_collider = playerCollider;
+                let desiredTranslation = new RAPIER.Vector3(input_sx*delta, s.y*delta, input_sz*delta);
+                let characterController = world.createCharacterController(0.0);
+                characterController.setMaxSlopeClimbAngle(45 * Math.PI / 180);
+                //characterController.enableSnapToGround(0.001);
+                characterController.computeColliderMovement(
+                    ctr_collider,    // The collider we would like to move.
+                    desiredTranslation, // The movement we would like to apply if there wasn’t any obstacle.
+                );
+                // Read the result.
+                let correctedMovement = characterController.computedMovement();
+                //console.log("correctedMovement:", correctedMovement);
+                //console.log("correctedMovement:", correctedMovement.x);
+                if(delta>0){
+                    //console.log("correctedMovement:", correctedMovement);
+                    //console.log("correctedVel:", correctedMovement.z/delta);
+                    playerBody.setLinvel({ x: correctedMovement.x/delta, y: correctedMovement.y/delta, z: correctedMovement.z/delta}, true);
+                }
+
             }else{
                 let s2x = s.x + input_sx*delta;
                 let s2z = s.z + input_sz*delta;
@@ -1261,36 +1652,6 @@ function init() {
                 playerBody.setLinvel({ x: s2x, y: s.y, z: s2z}, true);
             }
 
-            if(playerBody){
-                //console.log(playerBody.gravityScale());
-                let vx = playerBody.linvel().x;
-                let vy = playerBody.linvel().y;
-                let vz = playerBody.linvel().z;
-                let vmag = Math.sqrt(vx*vx+vy*vy+vz*vz)
-                //console.log("vmag:"+vmag);
-
-                //playerMoveDirection.copy(playerNewPosition).sub(playerLastPosition).normalize();
-                //console.log("playerMoveDirection:%o", playerMoveDirection);
-
-                //let dis = playerMoveDirection.copy(playerNewPosition).sub(playerLastPosition).length();
-                //console.log("dis:%o", dis/delta);
-
-                playerPlaneMoveDistance.copy(playerNewPosition).sub(playerLastPosition);
-                let vertical_spd = playerPlaneMoveDistance.y /delta;
-                playerPlaneMoveDistance.y = 0;
-                let plane_spd = playerPlaneMoveDistance.length() /delta;
-                //console.log("plane_spd:%o", plane_spd);
-                //console.log("vertical_spd:%o", vertical_spd);
-
-                if(move_num > 0 && c_player.isOnSlope && plane_spd < player_speed * 0.8  ){
-                    /*let spd_scale = player_speed / current_spd;
-                        //console.log("player_speed:%o", player_speed);
-                    console.log("spd_scale:%o", spd_scale);
-                    playerBody.setLinvel({ x: input_sx*spd_scale, y: s.y, z: input_sz*spd_scale}, true);*/
-                    playerBody.setLinvel({ x: input_sx, y: player_speed*4/5, z: input_sz}, true);
-                }
-
-            }
 
             c_player.angle_offset = c_player.angle_offset_init;
             if(c_player.model){
@@ -1313,7 +1674,7 @@ function init() {
 
             playerMesh.rotation.y = c_player.angle - c_player.angle_offset;
 
-            if(c_player.model && c_player.weapon==1 && !c_player.isCrouch){
+            /*if(c_player.model && c_player.weapon==1 && !c_player.isCrouch){
                 let ang2 = c_player.angle2;
                 c_player.model.traverse(function(obj) {
                     if(obj.name == "mixamorigSpine"){
@@ -1324,16 +1685,9 @@ function init() {
                     }
                 })
 
-                /*let wx = mWeaponOffset.dx;
-                let wz = mWeaponOffset.dz;
-                let wy = mWeaponOffset.dy;
-                let pz = Math.cos(ang2) * wz - Math.sin(ang2) * wy;
-                let py = Math.sin(ang2) * wz + Math.cos(ang2) * wy;
-                weaponMesh.position.set(wx,py,pz);
-                weaponMesh.rotation.x = -ang2;*/
-            };
+            };*/
 
-            if(c_player.isFiring && current_game_time > c_player.lastFiringTime + 100){
+            if( c_player.mode == 1 && c_player.isFiring && current_game_time > c_player.lastFiringTime + 100){
                 mPlayAudioBuffer(mArrayAudio[1])
                 c_player.lastFiringTime = new Date().getTime();
 
@@ -1358,14 +1712,15 @@ function init() {
                 let maxToi = grid_size*grid_num*2;
                 let solid = false;
                 let hit = world.castRay(ray, maxToi, solid);*/
-                let {hit, ray} = mCameraRayHit(camera);
+                //let {hit, ray} = mPlayerRayHit(camera);
+                let {hit, ray} = mPlayerRayHit(playerPiv1);
 
                 let hitPoint;
                 if (hit != null) {
                     hitPoint = ray.pointAt(hit.timeOfImpact); // Same as: `ray.origin + ray.dir * toi`
                     //console.log("Collider", hit.collider, "hit at point", hitPoint);
-                    //console.log("hit.timeOfImpact:", hit.timeOfImpact);
-                    if(hit.timeOfImpact >= mCameraOffset.dz){
+                    console.log("hit.timeOfImpact:", hit.timeOfImpact);
+                    if(hit.timeOfImpact >= 0 ){  //mCameraOffset.dz
                         const hitMesh = new THREE.Mesh(new THREE.SphereGeometry(playerRadius*0.1), new THREE.MeshBasicMaterial({color: 'orange'}))
                         hitMesh.position.set(hitPoint.x, hitPoint.y, hitPoint.z);
                         ArrayHitMesh.push(hitMesh);
@@ -1376,11 +1731,12 @@ function init() {
                             ArrayHitMesh.shift();
                         }
                         mPlayAudioBuffer(mArrayAudio[0]);
-                    }//
+                        node_vertices.push(hitPoint.x, hitPoint.y, hitPoint.z);
+                        mBuildDamage(hit);
+                    }else{
 
-                    node_vertices.push(hitPoint.x, hitPoint.y, hitPoint.z);
-                    mBuildDamage(hit);
-                    
+                    }
+
                 }else{
                     let p0 = camera.position;
                     let d = camera_dir; 
@@ -1389,8 +1745,11 @@ function init() {
                     node_vertices.push(p0.x + d.x * L, p0.y + d.y * L, p0.z + d.z * L);
                 }
                 
-                mCreateFiringMesh(node_vertices)
-                weaponMesh.position.z = mWeaponOffset.dz *1.02;
+                if(node_vertices.length > 3){
+                    mCreateFiringMesh(node_vertices)
+                }      
+                weaponMesh.position.y = mWeaponOffset.dy *0.99;
+                weaponMesh.position.z = mWeaponOffset.dz *1.05;
                 //console.log("weaponMesh:", weaponMesh)
                 //console.log("weaponMesh:", weaponMesh.getWorldPosition(new THREE.Vector3()))
             }
@@ -1400,8 +1759,26 @@ function init() {
                     scene.remove(c_player.firingMesh);
                     c_player.firingMesh = null;
                 }
+                weaponMesh.position.y = mWeaponOffset.dy;
                 weaponMesh.position.z = mWeaponOffset.dz;
             }
+
+
+            //--- Build ---//
+            if(c_player.mode == 2){
+                mSetBuildTemp(c_player);
+
+                if(c_player.buildTemp){
+                    mDrawBuildTemp(c_player.buildTemp)
+                }
+
+                if(c_player.nowTouboBuild){
+                    mDoBuild(c_player.buildTemp)
+                }
+            }
+            
+            //console.log("ArrayBuild:%o", ArrayBuild)
+
 
             mSetCameraPosition(camera, mCameraOffset, c_player); //playerMesh
             light.position.set(light_pos0.x + playerNewPosition.x, 
@@ -1415,11 +1792,13 @@ function init() {
         stats.end();
     }
 
-    function mCameraRayHit(camera_){
+    function mPlayerRayHit(piv_, sign_=1){
         let dir = new THREE.Vector3();
-        camera_.getWorldDirection(dir)
-        let cp = camera_.position;
-        let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, { x: dir.x, y: dir.y, z: dir.z });
+        piv_.getWorldDirection(dir)
+        //let cp = camera_.position;
+        let cp = piv_.getWorldPosition(new THREE.Vector3());
+        let ray = new RAPIER.Ray({ x: cp.x, y: cp.y, z: cp.z }, 
+                                 { x: dir.x*sign_, y: dir.y*sign_, z: dir.z*sign_ });
         let maxToi = grid_size*grid_num*2;
         let solid = false;
         let hit = world.castRay(ray, maxToi, solid);
@@ -1445,7 +1824,8 @@ function init() {
         if(b!=null){
             //console.log("ArrayBuild:%o", ArrayBuild);
             b.health -= 30;
-            b.buildMesh.material.opacity = b.health / b.maxHealth * 0.5 + 0.5;
+            //b.buildMesh.material.opacity = b.health / b.maxHealth * 0.5 + 0.5;
+            b.buildMesh.material.opacity = b.health / b.maxHealth * 0.7 + 0.3;;
             //console.log("b.buildMesh.material.opacity:%o", b.buildMesh.material.opacity);
             if(b.health<=0){
                 //b.buildMesh.material.opacity = 1;
@@ -1460,7 +1840,528 @@ function init() {
             b.buildMesh = null;
             world.removeCollider(b.collider);
             mPlayAudioBuffer(mArrayAudio[2], 2.0);
+
+            //ArrayBuild.slice(i, 1)
+            delete ArrayBuild[b.build_id]
         }
+    }
+
+
+    function mSetBuildTemp(player){
+
+        player.zWallTemp.visible = false;
+        player.xWallTemp.visible = false;
+        player.FloorTemp.visible = false;
+        player.zSlopeTemp.visible = false;
+        player.xSlopeTemp.visible = false;
+        player.ConeTemp.visible = false;
+
+        if(player.buildType == 0){
+            mWallTemp(player) 
+        }else if(player.buildType == 1){
+            mFloorTemp(player) 
+        }else if(player.buildType == 2){
+            mSlopeTemp(player) 
+        }else if(player.buildType == 3){
+            mConeTemp(player) 
+        }
+
+        player.buildTemp.buildType = player.buildType;
+    }
+
+    function mFloorGS(v_){ //floor to grid size
+        return Math.floor(v_/grid_size) * grid_size;
+    }
+
+    function mFloorGSH(v_){ //floor to grid size
+        return Math.floor(v_/gridH_size) * gridH_size;
+    }
+    
+    function mWallTemp(player){
+
+        //--- Z-X plane 
+        let angleType_ = Math.floor( (player.angle+Math.PI/4.0) / (Math.PI/2.0) );
+        angleType_ = angleType_ % 4;
+        let angle_ = angleType_ * Math.PI/2;
+        //console.log("angleType_:", angleType_);
+        //console.log("player:", player.playerMesh.position);
+
+        player.z = player.playerMesh.position.z;
+        player.x = player.playerMesh.position.x;
+        player.y = player.playerMesh.position.y;
+        
+        let z_ = mFloorGS(player.z);
+        let x_ = mFloorGS(player.x);
+        let y_ = mFloorGSH(player.y);
+        let dy_ =  player.y - y_;
+        //console.log("z_, x_, y_:", [z_, x_, y_]);
+
+        let ty_ = Math.min(Math.tan(player.angle2),2.0);
+        let ry_ = dy_ + grid_size/2.0*ty_;
+        //console.log('ty_:'+ty_);
+        
+        if( ry_ >= gridH_size/2.0 ){
+            y_ += gridH_size;
+        }else if( ( ry_ <= -gridH_size/2.0 ) && ( ry_ >= -gridH_size) )  {
+            y_ -= gridH_size;
+        }
+        y_ = Math.max(y_, 0)
+        
+        if( angleType_ == 0 ){
+            z_ += grid_size;
+            if( (player.z >= z_ - grid_size*0.15) && (player.angle2 >= -Math.PI/4.0) ){ //far
+                z_ += grid_size;          
+            }
+
+            if( player.x + (z_-player.z)*Math.tan(player.angle-angle_) >= x_ + grid_size  ){ //far side
+                x_ += grid_size;
+            }else if( player.x - (z_-player.z)*Math.tan(angle_-player.angle) <= x_  ){ //far side
+                x_ -= grid_size;
+            }
+            
+            x_ += grid_size/2;
+            y_ += gridH_size/2;
+
+            player.zWallTemp.position.set(x_, y_, z_);
+            player.buildTemp = player.zWallTemp;
+
+        }else if( angleType_ == 2 ){
+            if( (player.z <= z_ + grid_size*0.15) && (player.angle2 >= -Math.PI/4.0 ) ){ //far
+                z_ -= grid_size;          
+            }
+    
+            if( player.x + (player.z-z_)*Math.tan(angle_-player.angle) >= x_ + grid_size  ){ //far side
+                x_ += grid_size;
+            }else if( player.x - (player.z-z_)*Math.tan(player.angle-angle_) <= x_  ){ //far side
+                x_ -= grid_size;
+            }
+            
+            x_ += grid_size/2;
+            y_ += gridH_size/2;
+
+            player.zWallTemp.position.set(x_, y_, z_);
+            player.buildTemp = player.zWallTemp;
+
+        }else if( angleType_ == 1 ) {
+
+            x_ += grid_size;
+            if( (player.x >= x_ - grid_size*0.15) && (player.angle2 >= -Math.PI/4.0) ){ //far
+                x_ += grid_size;          
+            }
+    
+            if( player.z + (x_-player.x)*Math.tan(angle_-player.angle) >= z_ + grid_size  ){ //far side
+                z_ += grid_size;
+            }else if( player.z - (x_-player.x)*Math.tan(player.angle - angle_) <= z_  ){ //far side
+                z_ -= grid_size;
+            }
+            
+            z_ += grid_size/2;
+            y_ += gridH_size/2;
+
+            player.xWallTemp.position.set(x_, y_, z_);
+            //player.xWallTemp.visible = true;
+            player.buildTemp = player.xWallTemp;
+    
+        } else if( angleType_ == 3 ) {
+            if( (player.x<=x_ + grid_size*0.15) && (player.angle2 >= -Math.PI/4.0) ){
+                x_ -= grid_size;          
+            }
+
+            if( player.z + (player.x-x_)*Math.tan(player.angle-angle_) >= z_ + grid_size  ){ //far side
+                z_ += grid_size;
+            }else if( player.z - (player.x-x_)*Math.tan(angle_-player.angle) <= z_  ){ //far side
+                z_ -= grid_size;
+            }
+            
+            /*if( player.x + (player.y-y_)*Math.tan(player.angle-angle_) >= x_ + mFieldGridSize  ){ //far side
+                x_ += mFieldGridSize;
+            }else if( player.x - (player.y-y_)*Math.tan(angle_-player.angle) <= x_  ){ //far side
+                x_ -= mFieldGridSize;
+            }*/
+
+            z_ += grid_size/2;
+            y_ += gridH_size/2;
+
+            player.xWallTemp.position.set(x_, y_, z_);
+            //player.xWallTemp.visible = true;
+            player.buildTemp = player.xWallTemp;
+            
+        }
+        //console.log("z_, x_, y_:", [z_, x_, y_]);
+
+        player.buildTemp.angleType = angleType_;
+    }
+
+    function mFloorTemp(player){ 
+        //console.log("mFloorTemp:");
+
+        let x_ = player.playerMesh.position.x;
+        let y_ = player.playerMesh.position.y;
+        let z_ = player.playerMesh.position.z;
+    
+        let angle_ = player.angle
+        let angle2_ = player.angle2
+        let gz_ = mFloorGS(z_);
+        let gx_ = mFloorGS(x_);
+        let gy_ = mFloorGSH(y_); //+ mWallSizeH*0.2
+        
+        let ax_ = 0.0;
+        let ay_ = 0.0;
+        let az_ = 0.0;
+    
+        let l_ = 0.0;
+        if(angle2_ != 0.0){
+            l_ = player.height / Math.tan( Math.abs(angle2_) )
+        }
+        
+        let add_z = [1,1,0,-1,-1,-1,0,1];
+        let add_x = [0,1,1,1,0,-1,-1,-1];
+        let d_angle_ = angle_ + Math.PI/8.0
+        if(d_angle_ > 2.0*Math.PI){
+            d_angle_ -= 2.0*Math.PI
+        }
+
+        for(var i = 0; i < 8; i++ ){
+            if( ( d_angle_ >= Math.PI/4.0*i ) &&
+                ( d_angle_ <= Math.PI/4.0*( i+1 ) ) ){
+                
+                if( add_z[i] != 0 ){
+                    let qz_ = l_ * Math.cos(angle_)
+                    
+                    if( (add_z[i] > 0) && (z_ - gz_ >= grid_size*0.5) ){
+                        if( qz_ >= grid_size*0.5 ){
+                            az_ = grid_size;
+                        }
+                    } else if ( (add_z[i] < 0) && (z_ - gz_ <= grid_size*0.5) ){
+                        if( z_ + qz_ <=  gz_ ){
+                            az_ = -grid_size;
+                        }
+                    }
+                }
+    
+                if( add_x[i] != 0 ){
+                    let qx_ = l_ * Math.sin(angle_)
+                    //fmt.Println("qx:", qx_)
+                    if( (add_x[i] > 0) && (x_ - gx_ >= grid_size*0.5) ){
+                        if( qx_ >= grid_size*0.5 ){
+                            ax_ =grid_size;
+                        }
+                    } else if ( (add_x[i] < 0) && (x_ - gx_ <= grid_size*0.5) ){
+                        if( x_ + qx_ <=  gx_ ){
+                            ax_ = -grid_size;
+                        }
+                    }
+                }
+    
+                if(angle2_ > 0){
+                    ay_ = gridH_size;
+                }
+    
+                break;
+            }//
+        }//
+    
+        gz_ += grid_size*0.5;
+        gx_ += grid_size*0.5;
+        //console.log("pos:", [gx_ + ax_, gy_ + ay_, gz_ + az_]);
+        
+        player.FloorTemp.position.set(gx_ + ax_, gy_ + ay_, gz_ + az_);
+        player.buildTemp = player.FloorTemp;
+    }
+    
+    function mSlopeTemp(player){
+
+        //--- Z-X plane 
+        let angleType_ = Math.floor( (player.angle+Math.PI/4.0) / (Math.PI/2.0) );
+        angleType_ = angleType_ % 4;
+        let angle_ = angleType_ * Math.PI/2;
+        //console.log('angleType_:'+angleType_);
+
+        player.z = player.playerMesh.position.z;
+        player.x = player.playerMesh.position.x;
+        player.y = player.playerMesh.position.y;
+        
+        let z_ = mFloorGS(player.z);
+        let x_ = mFloorGS(player.x);
+        let y_ = mFloorGSH(player.y);
+        let dy_ =  player.y - y_;
+        
+        let ty_ = Math.min(Math.tan(player.angle2),2.0);
+        let ry_ = dy_ + grid_size/2.0*ty_;
+        //console.log('ty_:'+ty_);
+        
+        if( ry_ >= gridH_size/2.0 ){
+            y_ += gridH_size;
+        }else if( ( ry_ <= -gridH_size/2.0 ) && ( ry_ >= -gridH_size) )  {
+            y_ -= gridH_size;
+        }
+        y_ = Math.max(y_, 0)
+        //console.log('y_:'+y_);
+    
+        z_ += grid_size * Math.cos(angleType_*Math.PI/2);
+        x_ += grid_size * Math.sin(angleType_*Math.PI/2);
+        z_ = Math.round(z_)
+        x_ = Math.round(x_)
+        
+        if( (player.angle2 < -Math.PI/4) ){
+            z_ = mFloorGS(player.z);
+            x_ = mFloorGS(player.x);
+        }
+        //console.log("z_, x_, y_:", [z_, x_, y_]);
+    
+        
+        if( angleType_ == 0 ){
+    
+            if( player.x + (z_-player.z)*Math.tan(player.angle-angle_) >= x_ + grid_size  ){ //far side
+                x_ += grid_size;
+            }else if( player.x - (z_-player.z)*Math.tan(angle_-player.angle) <= x_  ){ //far side
+                x_ -= grid_size;
+            }
+            player.zSlopeTemp.rotation.x = -slope_ang;
+            player.buildTemp = player.zSlopeTemp;
+            
+        }else if( angleType_ == 2 ){
+    
+            if( player.x + (player.z-z_)*Math.tan(angle_-player.angle) >= x_ + grid_size  ){ //far side
+                x_ += grid_size;
+            }else if( player.x - (player.z-z_)*Math.tan(player.angle-angle_) <= x_  ){ //far side
+                x_ -= grid_size;
+            }
+            player.zSlopeTemp.rotation.x = slope_ang;
+            player.buildTemp = player.zSlopeTemp;
+            
+        }else if( angleType_ == 1 ) {
+    
+            if( player.z + (x_-player.x)*Math.tan(angle_-player.angle) >= z_ + grid_size  ){ //far side
+                z_ += grid_size;
+            }else if( player.z - (x_-player.x)*Math.tan(player.angle - angle_) <= z_  ){ //far side
+                z_ -= grid_size;
+            }
+            
+            player.xSlopeTemp.rotation.z = slope_ang;
+            player.buildTemp = player.xSlopeTemp;
+    
+        } else if( angleType_ == 3 ) {
+    
+            if( player.z + (player.x-x_)*Math.tan(player.angle-angle_) >= z_ + grid_size  ){ //far side
+                z_ += grid_size;
+            }else if( player.z - (player.x-x_)*Math.tan(angle_-player.angle) <= z_  ){ //far side
+                z_ -= grid_size;
+            }
+            
+            player.xSlopeTemp.rotation.z = -slope_ang;
+            player.buildTemp = player.xSlopeTemp;
+    
+        }
+    
+        z_ += grid_size/2;
+        x_ += grid_size/2;
+        y_ += gridH_size/2;
+
+        player.buildTemp.angleType = angleType_;
+        player.buildTemp.position.set(x_, y_, z_);
+    
+    }
+
+    function mConeTemp(player){ 
+
+        let x_ = player.playerMesh.position.x;
+        let y_ = player.playerMesh.position.y;
+        let z_ = player.playerMesh.position.z;
+    
+        let angle_ = player.angle
+        let angle2_ = player.angle2
+        let gz_ = mFloorGS(z_);
+        let gx_ = mFloorGS(x_);
+        let gy_ = mFloorGSH(y_); //+ mWallSizeH*0.2
+        
+        let ax_ = 0.0;
+        let ay_ = 0.0;
+        let az_ = 0.0;
+    
+        let l_ = 0.0;
+        let l2_ = 0.0; // for low position
+        let flag_low = 0;
+        if(angle2_ != 0.0){
+            l_ = player.height / Math.tan( Math.abs(angle2_) )
+            l2_ = (player.height+grid_size) / Math.tan( Math.abs(angle2_) )
+        }
+    
+        let add_z = [1,1,0,-1,-1,-1,0,1];
+        let add_x = [0,1,1,1,0,-1,-1,-1];
+        let d_angle_ = angle_ + Math.PI/8.0
+        if(d_angle_ > 2.0*Math.PI){
+            d_angle_ -= 2.0*Math.PI
+        }
+
+        for(var i = 0; i < 8; i++ ){
+            if( ( d_angle_ >= Math.PI/4.0*i ) &&
+                ( d_angle_ <= Math.PI/4.0*( i+1 ) ) ){
+                
+                if( add_z[i] != 0 ){
+                    let qz_ = l_ * Math.cos(angle_)
+                    let qz2_ = l2_ * Math.cos(angle_)
+                    let dlow_ = z_-gz_+qz2_;
+                    
+                    if( (add_z[i] > 0) && (z_ - gz_ >= grid_size*0.5) ){
+                        if( qz_ >= grid_size*0.5 ){
+                            az_ = grid_size;
+                        }                
+                        if( (dlow_ > grid_size) && (dlow_<2.0*grid_size) ){
+                            az_ = grid_size;
+                            flag_low = 1
+                        }else{
+                            flag_low = 0
+                        }
+                    } else if ( (add_z[i] < 0) && (z_ - gz_ <= grid_size*0.5) ){
+                        if( z_ + qz_ <=  gz_ ){
+                            az_ = -grid_size;
+                        }
+                        if( (dlow_ < 0) && (dlow_ > -1.0*grid_size) ){
+                            az_ = -grid_size;
+                            flag_low = 1
+                        }else{
+                            flag_low = 0
+                        }
+                    }
+                }
+    
+                if( add_x[i] != 0 ){
+                    let qx_ = l_ * Math.sin(angle_)
+                    let qx2_ = l2_ * Math.sin(angle_)
+                    let dlow_ = x_-gx_+qx2_;
+                    
+                    if( (add_x[i] > 0) && (x_ - gx_ >= grid_size*0.5) ){
+                        if( qx_ >= grid_size*0.5 ){
+                            ax_ = grid_size;
+                        }
+    
+                        if( (dlow_ > grid_size) && (dlow_<2.0*grid_size) ){
+                            ax_ = grid_size;
+                            flag_low = 1
+                        }else{
+                            flag_low = 0
+                        }
+                    } else if ( (add_x[i] < 0) && (x_ - gx_ <= grid_size*0.5) ){
+                        if( x_ + qx_ <=  gx_ ){
+                            ax_ = -grid_size;
+                        }
+                        if( (dlow_ < 0) && (dlow_ > -1.0*grid_size) ){
+                            ax_ = -grid_size;
+                            flag_low = 1
+                        }else{
+                            flag_low = 0
+                        }
+                    }
+                }
+    
+                if(angle2_ > 0){
+                    ay_ = gridH_size;
+                } else {
+                    if(flag_low==1){
+                        ay_ = -gridH_size;
+                    }
+                }
+    
+                break;
+            }//
+        }//
+        
+        gz_ += grid_size*0.5;
+        gx_ += grid_size*0.5;
+        gy_ += gridH_size*0.5;
+        //console.log("pos:", [gx_ + ax_, gy_ + ay_, gz_ + az_]);
+        
+        player.ConeTemp.position.set(gx_ + ax_, gy_ + ay_, gz_ + az_);
+        player.buildTemp = player.ConeTemp;
+
+    }
+    
+
+    function mCheckBuildIsUnique(build){
+        let judge = true;
+
+        /*for(var i = 0; i < ArrayBuild.length; i++){
+            let b = ArrayBuild[i].buildMesh; 
+            if(b==null){
+                continue
+            }
+            if(b.buildType == build.buildType &&
+                b.position.x == build.position.x && b.position.y == build.position.y &&  b.position.z == build.position.z ){
+                    judge = false;
+                    break
+                    //return judge;
+            }
+        }*/
+        //let n = 0;
+        Object.values(ArrayBuild).forEach((v) => {
+            //n += 1;
+            if(v!=null && v.buildMesh!=null){
+                let b = v.buildMesh;
+                //console.log("b:", b.buildType);  
+                if( b.position.x == build.position.x && b.position.y == build.position.y &&  b.position.z == build.position.z ){
+                    //b.buildType == build.buildType &&
+                        judge = false;
+                        //console.log("b:", b);  
+                        //break
+                        return judge;
+                }
+            }
+            
+        })
+        //console.log("mCheckBuildIsUnique:", judge);
+        //console.log("n:", n);
+        //console.log("n:", Object.keys(ArrayBuild).length);
+        return judge;
+    }
+
+    function mDrawBuildTemp(build){
+        console.log("mCheckBuildIsUnique:", mCheckBuildIsUnique(build));
+        if( mCheckBuildIsUnique(build) ){
+            build.visible = true;
+        }        
+    }
+
+    function mDoBuild(build){
+        if( !build.visible ){
+            return;
+        }
+
+        if( build.buildType == 0 ){
+            let px = build.position.x;
+            let py = build.position.y;
+            let pz = build.position.z;
+            let type = "z"
+            if( build.angleType==1 || build.angleType==3 ){
+                type = "x"
+            }
+            mCreateWall(px, py, pz, type);
+        }else if( build.buildType == 1 ){
+            let px = build.position.x;
+            let py = build.position.y;
+            let pz = build.position.z;
+            mCreateFloor(px, py, pz);
+        }else if( build.buildType == 2 ){
+            let px = build.position.x;
+            let py = build.position.y;
+            let pz = build.position.z;
+            let type = "z+"
+            if(build.angleType==1){
+                type = "x+"
+            }else if(build.angleType==2){
+                type = "z-"
+            }else if(build.angleType==3){
+                type = "x-"
+            }
+            mCreateSlope(px, py, pz, type);
+        }else if( build.buildType == 3 ){
+            let px = build.position.x;
+            let py = build.position.y;
+            let pz = build.position.z;
+            mCreateCone(px, py, pz);
+        }
+        mPlayAudioBuffer(mArrayAudio[4])
+
     }
     
 
@@ -1483,9 +2384,9 @@ function init() {
     }
 
     //Pointer lock
-    let mPointLock = 0;
+    //let mPointLock = false;
     function ElementRequestPointerLock(element){
-        mPointLock = 1;
+        //mPointLock = true;
         var list = [
             "requestPointerLock",
             "webkitRequestPointerLock",
@@ -1503,7 +2404,7 @@ function init() {
     }
 
     function DocumentExitPointerLock(document_obj){
-        mPointLock = 0;
+        //mPointLock = false;
         var list = [
             "exitPointerLock",
             "webkitExitPointerLock",
@@ -1520,9 +2421,9 @@ function init() {
         return false;
     }
 
-    function mEnablePointerLock(){
+    function mEnablePointerLock(canvas_){
         setTimeout(() => {
-            ElementRequestPointerLock(canvas2d); //->needs action to enable pointer lock
+            ElementRequestPointerLock(canvas_); //->needs action to enable pointer lock
         }, 1000);
     }
     
@@ -1542,16 +2443,40 @@ function init() {
         let fontSize = W_/100;
         context2d.font = fontSize + 'px Bold Arial';
         context2d.fillStyle = "white"
-        context2d.textAlign = "center"
-        context2d.fillText(
-            "P: pointer lock,  WASD: move,  Space: jump,  Shift: crouch,  Shift(long): slide",
+        //context2d.textAlign = "center"
+        /*context2d.fillText(
+            "Click view: pointer lock,  WASD: move,  Space: jump,  Shift: crouch,  Shift(long): slide",
             W_/2, fontSize);
         context2d.fillText(
             "Mouse move: player's view direction, Left click: shoot, Right click: ADS",
-            W_/2, fontSize*2);         
-        //context2d.fillStyle = "blue"
-        //context2d.fillRect(100, 100, 1000, 1000);
+            W_/2, fontSize*2);  
+        context2d.fillText(
+            "F: weapon mode, Q: wall, Z or wheel down: floor, C or wheel up: slope",
+            W_/2, fontSize*3); */
+        let array_string = [
+            "Click view: pointer lock",
+            "WASD: move",
+            "Space: jump",
+            "Shift: crouch",
+            "Shift(long): slide",
+            "Mouse move: view direction", 
+            "Left click: shoot", 
+            "Right click: ADS",
+            "F: weapon mode", 
+            "Q: wall", 
+            "Z or wheel down: floor", 
+            "C or wheel up: slope",
+            "TAB: cone",
+        ]
 
+        context2d.fillStyle = "rgba(0, 0, 0, 0.5)"
+        context2d.fillRect(10, 80, 250, fontSize*1.1*(array_string.length+1));
+        context2d.fillStyle = "white"
+
+        for(var i=0; i<array_string.length; i++){
+            context2d.fillText(array_string[i], 10, 100 + fontSize*1.1 * i);
+        }
+        
         let w_ = W_ / 50;
         context2d.strokeStyle = "white"
         context2d.lineWidth = 1;
